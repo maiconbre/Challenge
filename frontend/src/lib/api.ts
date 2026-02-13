@@ -22,3 +22,12 @@ export async function deleteEvent(id: string): Promise<boolean> {
     const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
     return res.ok;
 }
+
+export async function updateEvent(id: string, event: Partial<NewCalendarEvent>): Promise<boolean> {
+    const res = await fetch(`${API_BASE}/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(event)
+    });
+    return res.ok;
+}
