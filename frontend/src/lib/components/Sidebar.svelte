@@ -1,23 +1,25 @@
 <script lang="ts">
-    import { openCreateModal, selectedDateStore, setSelectedDate } from "$lib/stores";
+    import {
+        openCreateModal,
+        selectedDateStore,
+        setSelectedDate,
+    } from "$lib/stores";
     import { formatDateISO } from "$lib/utils/dateUtils";
 
     const quickNotes = [
-        { label: "Reunião", icon: "💼" },
-        { label: "Aniversário", icon: "🎂" },
-        { label: "Lembrete", icon: "⏰" },
+        { label: "Meeting", icon: "💼" },
+        { label: "Birthday", icon: "🎂" },
+        { label: "Reminder", icon: "⏰" },
         { label: "Daily", icon: "📅" },
-        { label: "Evento", icon: "🎉" },
+        { label: "Event", icon: "🎉" },
     ];
 
     // Mini Calendar Logic
     let currentDate = new Date();
-    // Subscribe to store to sync with main calendar if needed, or just push updates
-    // For now, let's just push updates when clicking
-    
+
     $: year = currentDate.getFullYear();
     $: month = currentDate.getMonth();
-    $: monthLabel = currentDate.toLocaleString("default", {
+    $: monthLabel = currentDate.toLocaleString("en-US", {
         month: "long",
         year: "numeric",
     });
@@ -58,12 +60,12 @@
         const remaining = 42 - days.length;
         for (let i = 1; i <= remaining; i++) {
             const d = new Date(year, month + 1, i);
-            days.push({ 
-                day: i, 
+            days.push({
+                day: i,
                 date: d,
                 dateStr: formatDateISO(d),
-                current: false, 
-                next: true 
+                current: false,
+                next: true,
             });
         }
         return days;
@@ -122,7 +124,7 @@
                 stroke-linejoin="round"
             />
         </svg>
-        <span class="text-lg">Criar</span>
+        <span class="text-lg">Create</span>
     </button>
 
     <!-- Mini Calendar -->
@@ -169,9 +171,9 @@
         <div
             class="grid grid-cols-7 text-center text-[10px] text-base-content/60 mb-1"
         >
-            <span>D</span><span>S</span><span>T</span><span>Q</span><span
-                >Q</span
-            ><span>S</span><span>S</span>
+            <span>S</span><span>M</span><span>T</span><span>W</span><span
+                >T</span
+            ><span>F</span><span>S</span>
         </div>
         <div class="grid grid-cols-7 gap-y-1 text-center text-xs">
             {#each days as { day, dateStr, current, today }}
@@ -181,7 +183,9 @@
                     {today
                         ? 'bg-primary text-primary-content'
                         : 'hover:bg-primary/20 cursor-pointer'}
-                    {$selectedDateStore === dateStr ? 'ring-2 ring-primary ring-offset-1' : ''}"
+                    {$selectedDateStore === dateStr
+                        ? 'ring-2 ring-primary ring-offset-1'
+                        : ''}"
                     on:click={() => handleDateClick(dateStr)}
                 >
                     {day}
@@ -195,7 +199,7 @@
         <h3
             class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3 px-2"
         >
-            Notas Rápidas
+            Quick Notes
         </h3>
         <ul class="menu bg-base-100 w-full p-0 gap-1">
             {#each quickNotes as note}

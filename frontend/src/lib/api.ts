@@ -3,17 +3,17 @@ import type { CalendarEvent, NewCalendarEvent } from './types';
 const API_BASE = import.meta.env.PUBLIC_API_URL || '/api/events';
 
 /**
- * Normaliza datas retornadas do backend .NET
- * Remove o sufixo 'Z' (UTC) para manter como ISO string compatível
+ * Normalizes dates returned from the .NET backend
+ * Removes the 'Z' (UTC) suffix to keep as compatible ISO string
  */
-function normalizeEvent(event: any): CalendarEvent {
+function normalizeEvent(event: Record<string, unknown>): CalendarEvent {
     return {
-        id: event.id,
-        title: event.title,
-        start: event.start?.replace('Z', '') || event.start,
-        end: event.end?.replace('Z', '') || event.end,
-        color: event.color,
-        location: event.location
+        id: String(event.id ?? ''),
+        title: String(event.title ?? ''),
+        start: String(event.start ?? '').replace('Z', ''),
+        end: String(event.end ?? '').replace('Z', ''),
+        color: event.color ? String(event.color) : undefined,
+        location: event.location ? String(event.location) : undefined
     };
 }
 
@@ -24,7 +24,7 @@ export async function fetchEvents(): Promise<CalendarEvent[]> {
         const data = await res.json();
         return Array.isArray(data) ? data.map(normalizeEvent) : [];
     } catch (error) {
-        console.error('[API] Erro ao buscar eventos:', error);
+        console.error('[API] Error fetching events:', error);
         return [];
     }
 }
@@ -36,13 +36,13 @@ export async function createEvent(event: NewCalendarEvent): Promise<CalendarEven
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(event)
         });
-        
+
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        
+
         const data = await res.json();
         return normalizeEvent(data);
     } catch (error) {
-        console.error('[API] Erro ao criar evento:', error);
+        console.error('[API] Error creating event:', error);
         return null;
     }
 }
@@ -52,7 +52,7 @@ export async function deleteEvent(id: string): Promise<boolean> {
         const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
         return res.ok;
     } catch (error) {
-        console.error('[API] Erro ao deletar evento:', error);
+        console.error('[API] Error deleting event:', error);
         return false;
     }
 }
@@ -66,7 +66,7 @@ export async function updateEvent(event: CalendarEvent): Promise<boolean> {
         });
         return res.ok;
     } catch (error) {
-        console.error('[API] Erro ao atualizar evento:', error);
+        console.error('[API] Error updating event:', error);
         return false;
     }
 }

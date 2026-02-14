@@ -11,31 +11,21 @@
         createModalStore,
         openCreateModal,
         closeCreateModal,
-        type Toast,
         toastStore,
         showToast,
         selectedDateStore,
         setSelectedDate,
     } from "$lib/stores";
     import {
-        WEEKDAYS,
-        HOURS,
-        PIXELS_PER_HOUR,
         formatDateISO,
         getTodayISO,
         getMonthLabel,
-        buildCalendarDays,
         getDatePart,
         getTimePart,
-        getHourAndMinute,
-        calculatePixelTop,
-        calculateDurationMinutes,
         addWeeks,
         subWeeks,
         addMonths,
         subMonths,
-        addDays,
-        subDays,
     } from "$lib/utils/dateUtils";
 
     import WeekView from "$lib/components/WeekView.svelte";
@@ -75,20 +65,8 @@
         newEnd: Date;
     } | null = null;
 
-    // Explicitly typed toast variable for template
-    // Removed redundant toasts variable
-
-    // Computed properties
-    $: currentYear = currentDate.getFullYear();
-    $: currentMonth = currentDate.getMonth();
-
-    // Header Label based on View Mode
-    $: headerLabel = (() => {
-        return getMonthLabel(currentDate);
-    })();
-
-    // CRITICAL: Ensure events reactivity - any change to events array triggers re-render
-    $: eventCount = events.length;
+    // Header label
+    $: headerLabel = getMonthLabel(currentDate);
 
     // Store subscription
     $: selectedDate = $selectedDateStore;
@@ -126,27 +104,11 @@
         return `${dateStr}T${hours}:${minutes}:00`;
     }
 
-    // Drag and Drop Logic for Page (updates via API)
-    function handleEventDrop(event: CustomEvent) {
-        const {
-            event: calendarEvent,
-            newHour,
-            newMinute,
-            newStart: droppedStart,
-        } = event.detail;
-
-        let newStart: Date;
-
-        if (droppedStart) {
-            // Week View logic provides full date
-            newStart = droppedStart;
-        } else {
-            // Fallback (should not happen without DayView, but keep safe)
-            const dateStr = selectedDate;
-            newStart = new Date(
-                `${dateStr}T${String(newHour).padStart(2, "0")}:${String(newMinute).padStart(2, "0")}:00`,
-            );
-        }
+    // Drag & drop: receive event drop from WeekView
+    function handleEventDrop(
+        event: CustomEvent<{ event: CalendarEvent; newStart: Date }>,
+    ) {
+        const { event: calendarEvent, newStart } = event.detail;
 
         const originalStart = new Date(calendarEvent.start);
         const originalEnd = new Date(calendarEvent.end);
@@ -154,7 +116,6 @@
 
         const newEnd = new Date(newStart.getTime() + durationMs);
 
-        // Store pending logic and show confirmation modal
         pendingDropEvent = {
             event: calendarEvent,
             newStart,
@@ -186,14 +147,14 @@
             // API Call
             await updateEvent(updated);
 
-            showToast("Evento atualizado com sucesso!", "success", 200);
+            showToast("Event updated successfully!", "success", 200);
         } catch (error) {
             // Revert
             events = events.map((e) =>
                 e.id === calendarEvent.id ? calendarEvent : e,
             );
             eventsVersion += 1;
-            showToast("Erro ao mover evento", "error", 500);
+            showToast("Error moving event", "error", 500);
         }
     }
 
@@ -221,10 +182,8 @@
         showEventModal = true;
     }
 
-    // Handle clicks from MonthView/WeekView
-    // Handle clicks from MonthView
-    function handleDayClick(dateStr: string, hour?: number) {
-        // Switch to week view for that day
+    // Handle day click from views
+    function handleDayClick(dateStr: string) {
         setSelectedDate(dateStr);
         currentDate = new Date(dateStr + "T00:00:00");
         viewMode = "week";
@@ -239,7 +198,6 @@
     function handleWeekDayClick(
         event: CustomEvent<{ dateStr: string; hour: number }>,
     ) {
-        // Maybe just open create modal for week view?
         openCreateForDay(event.detail.dateStr, event.detail.hour);
     }
 
@@ -252,11 +210,18 @@
     }
 
     async function handleCreate(): Promise<void> {
-        const { title, startDate, startTime, endDate, endTime, color, location } =
-            $createModalStore;
+        const {
+            title,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            color,
+            location,
+        } = $createModalStore;
 
         if (!title.trim() || !startDate || !endDate || !startTime || !endTime) {
-            showToast("Preencha todos os campos", "warning");
+            showToast("Please fill all fields", "warning");
             return;
         }
 
@@ -270,40 +235,36 @@
             });
 
             if (created) {
-                // CRITICAL: Force explicit reactivity - reassign to trigger updates
                 events = [...events, created];
 
-                // Also update selectedDay to show where event was created
                 setSelectedDate(startDate);
-                currentDate = new Date(startDate + "T00:00:00"); // Ensure we jump to it as well if needed
+                currentDate = new Date(startDate + "T00:00:00");
 
-                // Show success toast with status code
                 showToast(
-                    `Evento "${created.title}" criado com sucesso!`,
+                    `Event "${created.title}" created successfully!`,
                     "success",
                     200,
                     4000,
                 );
 
-                // Close modal
                 closeCreateModal();
             } else {
                 showToast(
-                    "Erro ao criar evento - resposta vazia do servidor",
+                    "Error creating event - empty server response",
                     "error",
                     500,
                 );
             }
         } catch (error) {
             console.error("[handleCreate]", error);
-            showToast("Erro ao criar evento", "error", 500);
+            showToast("Error creating event", "error", 500);
         }
     }
 
     async function handleDelete(): Promise<void> {
         if (!selectedEvent) return;
 
-        if (!confirm(`Deletar evento "${selectedEvent.title}"?`)) return;
+        if (!confirm(`Delete event "${selectedEvent.title}"?`)) return;
 
         const previousEvents = events;
         const deletingEvent = selectedEvent;
@@ -315,7 +276,7 @@
         const success = await deleteEvent(deletingEvent.id);
         if (success) {
             showToast(
-                `Evento "${deletingEvent.title}" deletado com sucesso!`,
+                `Event "${deletingEvent.title}" deleted successfully!`,
                 "success",
                 200,
                 3000,
@@ -323,14 +284,14 @@
         } else {
             events = previousEvents;
             eventsVersion += 1;
-            showToast("Erro ao deletar evento", "error", 500);
+            showToast("Error deleting event", "error", 500);
         }
     }
 
     async function handleEventUpdate(): Promise<void> {
         if (!selectedEvent) return;
         if (!editStartDate || !editStartTime || !editEndDate || !editEndTime) {
-            showToast("Preencha data e hora", "warning");
+            showToast("Fill date and time", "warning");
             return;
         }
         const updatedStart = `${editStartDate}T${editStartTime}:00`;
@@ -342,7 +303,7 @@
             Number.isNaN(endDate.getTime()) ||
             endDate <= startDate
         ) {
-            showToast("Período inválido", "warning");
+            showToast("Invalid period", "warning");
             return;
         }
         const previous = selectedEvent;
@@ -360,11 +321,11 @@
 
         try {
             await updateEvent(updated);
-            showToast("Evento atualizado com sucesso!", "success", 200);
+            showToast("Event updated successfully!", "success", 200);
         } catch (error) {
             events = events.map((e) => (e.id === previous.id ? previous : e));
             eventsVersion += 1;
-            showToast("Erro ao atualizar evento", "error", 500);
+            showToast("Error updating event", "error", 500);
         }
     }
 
@@ -393,9 +354,9 @@
                 <button
                     class="btn btn-sm btn-outline px-4"
                     on:click={goToday}
-                    title="Voltar para hoje"
+                    title="Back to today"
                 >
-                    Hoje
+                    Today
                 </button>
 
                 <!-- Navigation -->
@@ -403,7 +364,7 @@
                     <button
                         class="btn btn-sm btn-ghost btn-circle"
                         on:click={prevPeriod}
-                        title="Anterior"
+                        title="Previous"
                     >
                         <svg
                             class="w-5 h-5"
@@ -422,7 +383,7 @@
                     <button
                         class="btn btn-sm btn-ghost btn-circle"
                         on:click={nextPeriod}
-                        title="Próximo"
+                        title="Next"
                     >
                         <svg
                             class="w-5 h-5"
@@ -449,7 +410,7 @@
 
         <!-- View Switcher -->
         <div class="flex items-center gap-2">
-            <!-- Removidos botões de busca e settings -->
+            <!-- Removed search and settings buttons -->
 
             <!-- View Mode Dropdown -->
             <div class="dropdown dropdown-end z-50">
@@ -457,7 +418,7 @@
                     tabindex="0"
                     class="btn btn-outline btn-sm m-1 min-w-[100px] justify-between"
                 >
-                    {viewMode === "week" ? "Semana" : "Mês"}
+                    {viewMode === "week" ? "Week" : "Month"}
                     <svg
                         class="w-4 h-4 ml-1"
                         fill="none"
@@ -480,8 +441,8 @@
                         <button
                             class={viewMode === "week" ? "active" : ""}
                             on:click={() => (viewMode = "week")}
-                            >Semana <span class="text-xs opacity-50 ml-auto"
-                                >S</span
+                            >Week <span class="text-xs opacity-50 ml-auto"
+                                >W</span
                             ></button
                         >
                     </li>
@@ -489,7 +450,7 @@
                         <button
                             class={viewMode === "month" ? "active" : ""}
                             on:click={() => (viewMode = "month")}
-                            >Mês <span class="text-xs opacity-50 ml-auto"
+                            >Month <span class="text-xs opacity-50 ml-auto"
                                 >M</span
                             ></button
                         >
@@ -542,18 +503,18 @@
             aria-labelledby="create-modal-title"
         >
             <h3 id="create-modal-title" class="text-lg font-bold mb-4">
-                Criar Evento
+                Create Event
             </h3>
 
             <div class="form-control w-full">
                 <label class="label" for="event-title">
-                    <span class="label-text font-semibold">Título</span>
+                    <span class="label-text font-semibold">Title</span>
                 </label>
                 <input
                     id="event-title"
                     type="text"
                     bind:value={$createModalStore.title}
-                    placeholder="Ex: Reunião, Almoço..."
+                    placeholder="Ex: Meeting, Lunch..."
                     class="input input-bordered w-full"
                     autofocus
                 />
@@ -562,7 +523,7 @@
             <div class="mt-4 grid grid-cols-2 gap-3">
                 <div class="form-control">
                     <label class="label" for="event-start-date">
-                        <span class="label-text text-sm">Data Início</span>
+                        <span class="label-text text-sm">Start Date</span>
                     </label>
                     <input
                         id="event-start-date"
@@ -573,7 +534,7 @@
                 </div>
                 <div class="form-control">
                     <label class="label" for="event-start-time">
-                        <span class="label-text text-sm">Hora Início</span>
+                        <span class="label-text text-sm">Start Time</span>
                     </label>
                     <input
                         id="event-start-time"
@@ -587,7 +548,7 @@
             <div class="mt-3 grid grid-cols-2 gap-3">
                 <div class="form-control">
                     <label class="label" for="event-end-date">
-                        <span class="label-text text-sm">Data Fim</span>
+                        <span class="label-text text-sm">End Date</span>
                     </label>
                     <input
                         id="event-end-date"
@@ -598,7 +559,7 @@
                 </div>
                 <div class="form-control">
                     <label class="label" for="event-end-time">
-                        <span class="label-text text-sm">Hora Fim</span>
+                        <span class="label-text text-sm">End Time</span>
                     </label>
                     <input
                         id="event-end-time"
@@ -611,13 +572,14 @@
 
             <div class="mt-4">
                 <div class="text-xs font-semibold text-base-content/60 mb-2">
-                    Cor do evento
+                    Event Color
                 </div>
                 <div class="flex flex-wrap gap-2">
                     {#each eventColors as color}
                         <button
                             class="w-7 h-7 rounded-full border border-base-200"
-                            style="background-color: {color}; box-shadow: {$createModalStore.color === color
+                            style="background-color: {color}; box-shadow: {$createModalStore.color ===
+                            color
                                 ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
                                 : 'none'};"
                             on:click={() =>
@@ -625,7 +587,7 @@
                                     ...$createModalStore,
                                     color,
                                 })}
-                            aria-label="Selecionar cor"
+                            aria-label="Select color"
                         />
                     {/each}
                 </div>
@@ -633,23 +595,23 @@
 
             <div class="form-control mt-4">
                 <label class="label" for="event-location">
-                    <span class="label-text text-sm">Local</span>
+                    <span class="label-text text-sm">Location</span>
                 </label>
                 <input
                     id="event-location"
                     type="text"
                     bind:value={$createModalStore.location}
                     class="input input-bordered input-sm"
-                    placeholder="Ex: Sala 3"
+                    placeholder="Ex: Room 3"
                 />
             </div>
 
             <div class="modal-action mt-6">
                 <button class="btn btn-outline" on:click={closeCreateModal}
-                    >Cancelar</button
+                    >Cancel</button
                 >
                 <button class="btn btn-primary" on:click={handleCreate}
-                    >Criar</button
+                    >Create</button
                 >
             </div>
         </div>
@@ -663,14 +625,16 @@
 {#if showConfirmModal && pendingDropEvent}
     <div class="modal modal-open z-50">
         <div class="modal-box">
-            <h3 class="font-bold text-lg">Confirmar Alteração</h3>
+            <h3 class="font-bold text-lg">Confirm Change</h3>
             <p class="py-4">
-                Deseja mover o evento <b>"{pendingDropEvent.event.title}"</b>
-                para:
+                Do you want to move the event <b
+                    >"{pendingDropEvent.event.title}"</b
+                >
+                to:
                 <br />
                 <b>
-                    {pendingDropEvent.newStart.toLocaleDateString("pt-BR")} às {pendingDropEvent.newStart.toLocaleTimeString(
-                        "pt-BR",
+                    {pendingDropEvent.newStart.toLocaleDateString("en-US")} at {pendingDropEvent.newStart.toLocaleTimeString(
+                        "en-US",
                         { hour: "2-digit", minute: "2-digit" },
                     )}
                 </b>
@@ -678,10 +642,10 @@
             </p>
             <div class="modal-action">
                 <button class="btn btn-outline" on:click={cancelDrop}
-                    >Cancelar</button
+                    >Cancel</button
                 >
                 <button class="btn btn-primary" on:click={confirmDrop}
-                    >Confirmar</button
+                    >Confirm</button
                 >
             </div>
         </div>
@@ -712,7 +676,7 @@
                         showEventModal = false;
                         selectedEvent = null;
                     }}
-                    aria-label="Fechar"
+                    aria-label="Close"
                 >
                     ✕
                 </button>
@@ -721,7 +685,7 @@
             <div class="grid grid-cols-2 gap-3 mb-3">
                 <div class="form-control">
                     <label class="label" for="event-edit-start-date">
-                        <span class="label-text text-sm">Data Início</span>
+                        <span class="label-text text-sm">Start Date</span>
                     </label>
                     <input
                         id="event-edit-start-date"
@@ -732,7 +696,7 @@
                 </div>
                 <div class="form-control">
                     <label class="label" for="event-edit-start-time">
-                        <span class="label-text text-sm">Hora Início</span>
+                        <span class="label-text text-sm">Start Time</span>
                     </label>
                     <input
                         id="event-edit-start-time"
@@ -746,7 +710,7 @@
             <div class="grid grid-cols-2 gap-3 mb-3">
                 <div class="form-control">
                     <label class="label" for="event-edit-end-date">
-                        <span class="label-text text-sm">Data Fim</span>
+                        <span class="label-text text-sm">End Date</span>
                     </label>
                     <input
                         id="event-edit-end-date"
@@ -757,7 +721,7 @@
                 </div>
                 <div class="form-control">
                     <label class="label" for="event-edit-end-time">
-                        <span class="label-text text-sm">Hora Fim</span>
+                        <span class="label-text text-sm">End Time</span>
                     </label>
                     <input
                         id="event-edit-end-time"
@@ -770,30 +734,31 @@
 
             <div class="form-control mb-4">
                 <label class="label" for="event-edit-location">
-                    <span class="label-text text-sm">Local</span>
+                    <span class="label-text text-sm">Location</span>
                 </label>
                 <input
                     id="event-edit-location"
                     type="text"
                     bind:value={editLocation}
                     class="input input-bordered input-sm"
-                    placeholder="Ex: Sala 3"
+                    placeholder="Ex: Room 3"
                 />
             </div>
 
             <div class="mb-4">
                 <div class="text-xs font-semibold text-base-content/60 mb-2">
-                    Cor do evento
+                    Event Color
                 </div>
                 <div class="flex flex-wrap gap-2">
                     {#each eventColors as color}
                         <button
                             class="w-7 h-7 rounded-full border border-base-200"
-                            style="background-color: {color}; box-shadow: {selectedEventColor === color
+                            style="background-color: {color}; box-shadow: {selectedEventColor ===
+                            color
                                 ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
                                 : 'none'};"
                             on:click={() => (selectedEventColor = color)}
-                            aria-label="Selecionar cor"
+                            aria-label="Select color"
                         />
                     {/each}
                 </div>
@@ -807,13 +772,16 @@
                         selectedEvent = null;
                     }}
                 >
-                    Cancelar
+                    Cancel
                 </button>
-                <button class="btn btn-error btn-outline" on:click={handleDelete}>
-                    Excluir
+                <button
+                    class="btn btn-error btn-outline"
+                    on:click={handleDelete}
+                >
+                    Delete
                 </button>
                 <button class="btn btn-primary" on:click={handleEventUpdate}>
-                    Atualizar
+                    Update
                 </button>
             </div>
         </div>

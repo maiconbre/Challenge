@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { createEventDispatcher, onDestroy } from "svelte";
+    import { createEventDispatcher, onDestroy, tick } from "svelte";
     import type { CalendarEvent } from "$lib/types";
     import { selectedDateStore } from "$lib/stores";
-    import { fade } from "svelte/transition";
+
     import {
         HOURS,
         PIXELS_PER_HOUR,
@@ -13,9 +13,8 @@
         getDatePart,
         calculatePixelTop,
         getHourAndMinute,
+        formatDayAbbrev,
     } from "$lib/utils/dateUtils";
-    import { format } from "date-fns";
-    import { ptBR } from "date-fns/locale";
 
     export let events: CalendarEvent[] = [];
     export let currentDate: Date;
@@ -30,10 +29,29 @@
     let weekDays: Date[] = [];
     $: weekDays = getWeekDays(currentDate);
     $: selectedDate = $selectedDateStore;
-    $: weekKey = weekDays.length
-        ? formatDateISO(weekDays[0])
-        : formatDateISO(currentDate);
+
     const defaultEventColor = "#3b82f6";
+
+    // Slide animation state
+    let slideClass = "";
+    let prevDateKey = "";
+
+    $: {
+        const newKey = formatDateISO(currentDate);
+        if (prevDateKey && newKey !== prevDateKey) {
+            const oldDate = new Date(prevDateKey + "T00:00:00");
+            const direction =
+                currentDate > oldDate ? "slide-from-right" : "slide-from-left";
+            slideClass = direction;
+            // Remove the class after animation completes
+            tick().then(() => {
+                setTimeout(() => {
+                    slideClass = "";
+                }, 300);
+            });
+        }
+        prevDateKey = newKey;
+    }
 
     function getEventsForDay(date: Date): CalendarEvent[] {
         const dateStr = formatDateISO(date);
@@ -63,9 +81,8 @@
     let dragTranslateX: number = 0;
     let gridEl: HTMLDivElement | null = null;
     let timeAxisEl: HTMLDivElement | null = null;
-    let lastEdgeShiftAt = 0;
+    let hasSwitchedWeek = false;
     const edgeThreshold = 32;
-    const edgeCooldownMs = 1200;
 
     function getDayWidth(): number {
         if (!gridEl || !timeAxisEl || weekDays.length === 0) {
@@ -130,6 +147,7 @@
         }
         currentDayIndex = initialDayIndex;
         dragTranslateX = 0;
+        hasSwitchedWeek = false;
 
         window.addEventListener("mousemove", handleWindowMouseMove);
         window.addEventListener("mouseup", handleWindowMouseUp);
@@ -149,9 +167,10 @@
         dragTranslateX = (currentDayIndex - initialDayIndex) * dayWidth;
 
         const direction = getEdgeDirection(e.clientX);
-        const now = Date.now();
-        if (direction !== 0 && now - lastEdgeShiftAt >= edgeCooldownMs) {
-            lastEdgeShiftAt = now;
+
+        // Single switch per drag session
+        if (direction !== 0 && !hasSwitchedWeek) {
+            hasSwitchedWeek = true;
             initialDayIndex = currentDayIndex;
             dragTranslateX = 0;
             dispatch("weekEdge", { direction });
@@ -161,8 +180,7 @@
     function handleWindowMouseUp(e: MouseEvent) {
         if (!draggingId) return;
 
-        const event =
-            draggingEvent || events.find((e) => e.id === draggingId);
+        const event = draggingEvent || events.find((e) => e.id === draggingId);
 
         window.removeEventListener("mousemove", handleWindowMouseMove);
         window.removeEventListener("mouseup", handleWindowMouseUp);
@@ -222,7 +240,7 @@
                 <div
                     class="text-xs uppercase font-semibold text-base-content/60"
                 >
-                    {format(day, "EEE", { locale: ptBR })}
+                    {formatDayAbbrev(day)}
                 </div>
                 <div
                     class="text-lg font-normal rounded-full w-8 h-8 flex items-center justify-center mx-auto
@@ -238,104 +256,103 @@
 
     <!-- Scrollable Grid -->
     <div class="flex-1 overflow-y-auto relative custom-scrollbar">
-        {#key weekKey}
+        <div
+            class="flex relative min-h-[1440px] {slideClass}"
+            style="height: {24 * PIXELS_PER_HOUR}px;"
+            bind:this={gridEl}
+        >
             <div
-                class="flex relative min-h-[1440px]"
-                style="height: {24 * PIXELS_PER_HOUR}px;"
-                bind:this={gridEl}
-                transition:fade={{ duration: 200 }}
+                class="w-12 flex-none border-r border-base-200 bg-base-100 sticky left-0 z-20"
+                bind:this={timeAxisEl}
             >
+                {#each HOURS as hour}
+                    <div class="h-[60px] relative">
+                        <span
+                            class="absolute -top-3 right-1 text-xs text-base-content/50 pr-1"
+                        >
+                            {formatTime(hour)}
+                        </span>
+                    </div>
+                {/each}
+            </div>
+
+            {#each weekDays as day, dayIndex}
                 <div
-                    class="w-12 flex-none border-r border-base-200 bg-base-100 sticky left-0 z-20"
-                    bind:this={timeAxisEl}
+                    class="flex-1 border-l border-base-200 first:border-l-0 relative min-w-[120px]
+                        {selectedDate === formatDateISO(day)
+                        ? 'ring-1 ring-primary/40 ring-inset'
+                        : ''}"
                 >
                     {#each HOURS as hour}
-                        <div class="h-[60px] relative">
-                            <span
-                                class="absolute -top-3 right-1 text-xs text-base-content/50 pr-1"
-                            >
-                                {formatTime(hour)}
-                            </span>
+                        <div
+                            class="absolute w-full border-b border-base-200/50 h-[60px] group transition-colors hover:bg-base-200/20"
+                            style="top: {hour * PIXELS_PER_HOUR}px;"
+                            on:click={() =>
+                                dispatch("dayClick", {
+                                    dateStr: formatDateISO(day),
+                                    hour,
+                                })}
+                            role="gridcell"
+                            tabindex="0"
+                            aria-label="Time slot"
+                            on:keydown={() => {}}
+                        >
+                            <div
+                                class="absolute top-1/2 w-full border-t border-base-200/30 border-dashed"
+                            ></div>
                         </div>
                     {/each}
-                </div>
 
-                {#each weekDays as day, dayIndex}
-                    <div
-                        class="flex-1 border-l border-base-200 first:border-l-0 relative min-w-[120px]
-                        {selectedDate === formatDateISO(day)
-                            ? 'ring-1 ring-primary/40 ring-inset'
-                            : ''}"
-                    >
-                        {#each HOURS as hour}
-                            <div
-                                class="absolute w-full border-b border-base-200/50 h-[60px] group transition-colors hover:bg-base-200/20"
-                                style="top: {hour * PIXELS_PER_HOUR}px;"
-                                on:click={() =>
-                                    dispatch("dayClick", {
-                                        dateStr: formatDateISO(day),
-                                        hour,
-                                    })}
-                                role="gridcell"
-                                tabindex="0"
-                                aria-label="Time slot"
-                                on:keydown={() => {}}
-                            >
-                                <div
-                                    class="absolute top-1/2 w-full border-t border-base-200/30 border-dashed"
-                                ></div>
-                            </div>
-                        {/each}
-
-                        {#each getEventsForDay(day) as event (event.id)}
-                            <div
-                                class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border"
-                                style="
+                    {#each getEventsForDay(day) as event (event.id)}
+                        <div
+                            class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border"
+                            style="
                                     top: {draggingId === event.id
-                                    ? currentTop
-                                    : getEventTop(event)}px;
+                                ? currentTop
+                                : getEventTop(event)}px;
                                     height: {getEventHeight(event)}px;
-                                    z-index: {draggingId === event.id ? 50 : 10};
-                                    opacity: {draggingId === event.id ? 0.9 : 1};
+                                    z-index: {draggingId === event.id
+                                ? 50
+                                : 10};
+                                    opacity: {draggingId === event.id
+                                ? 0.9
+                                : 1};
                                     transform: {draggingId === event.id
-                                    ? `translateX(${dragTranslateX}px) scale(1.02)`
-                                    : 'scale(1)'};
+                                ? `translateX(${dragTranslateX}px) scale(1.02)`
+                                : 'scale(1)'};
                                     box-shadow: {draggingId === event.id
-                                    ? '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                    : ''};
+                                ? '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                                : ''};
                                     transition: {draggingId === event.id
-                                    ? 'none'
-                                    : 'top 0.1s ease-out, background-color 0.15s ease'};
-                                    background-color: {event.color || defaultEventColor};
-                                    border-color: {event.color || defaultEventColor};
+                                ? 'none'
+                                : 'top 0.1s ease-out, background-color 0.15s ease'};
+                                    background-color: {event.color ||
+                                defaultEventColor};
+                                    border-color: {event.color ||
+                                defaultEventColor};
                                 "
-                                on:mousedown={(e) => handleMouseDown(e, event)}
-                                on:click|stopPropagation
-                                role="button"
-                                tabindex="0"
-                                on:keydown={() => {}}
-                            >
-                                <div class="font-bold truncate pointer-events-none">
-                                    {event.title}
-                                </div>
-                                <div
-                                    class="opacity-80 truncate pointer-events-none"
-                                >
-                                    {getTimePart(event.start)} - {getTimePart(
-                                        event.end,
-                                    )}
-                                </div>
+                            on:mousedown={(e) => handleMouseDown(e, event)}
+                            on:click|stopPropagation
+                            role="button"
+                            tabindex="0"
+                            on:keydown={() => {}}
+                        >
+                            <div class="font-bold truncate pointer-events-none">
+                                {event.title}
                             </div>
-                        {/each}
-                        {#if draggingEvent &&
-                            draggingId === draggingEvent.id &&
-                            dayIndex === currentDayIndex &&
-                            !getEventsForDay(day).some(
-                                (e) => e.id === draggingEvent?.id,
-                            )}
                             <div
-                                class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border pointer-events-none"
-                                style="
+                                class="opacity-80 truncate pointer-events-none"
+                            >
+                                {getTimePart(event.start)} - {getTimePart(
+                                    event.end,
+                                )}
+                            </div>
+                        </div>
+                    {/each}
+                    {#if draggingEvent && draggingId === draggingEvent.id && dayIndex === currentDayIndex && !getEventsForDay(day).some((e) => e.id === draggingEvent?.id)}
+                        <div
+                            class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border pointer-events-none"
+                            style="
                                     top: {currentTop}px;
                                     height: {getEventHeight(draggingEvent)}px;
                                     z-index: 50;
@@ -343,28 +360,29 @@
                                     transform: scale(1.02);
                                     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
                                     transition: none;
-                                    background-color: {draggingEvent.color || defaultEventColor};
-                                    border-color: {draggingEvent.color || defaultEventColor};
+                                    background-color: {draggingEvent.color ||
+                                defaultEventColor};
+                                    border-color: {draggingEvent.color ||
+                                defaultEventColor};
                                 "
-                                role="button"
-                                tabindex="0"
-                            >
-                                <div class="font-bold truncate pointer-events-none">
-                                    {draggingEvent.title}
-                                </div>
-                                <div
-                                    class="opacity-80 truncate pointer-events-none"
-                                >
-                                    {getTimePart(draggingEvent.start)} - {getTimePart(
-                                        draggingEvent.end,
-                                    )}
-                                </div>
+                            role="button"
+                            tabindex="0"
+                        >
+                            <div class="font-bold truncate pointer-events-none">
+                                {draggingEvent.title}
                             </div>
-                        {/if}
-                    </div>
-                {/each}
-            </div>
-        {/key}
+                            <div
+                                class="opacity-80 truncate pointer-events-none"
+                            >
+                                {getTimePart(draggingEvent.start)} - {getTimePart(
+                                    draggingEvent.end,
+                                )}
+                            </div>
+                        </div>
+                    {/if}
+                </div>
+            {/each}
+        </div>
     </div>
 </div>
 
@@ -378,5 +396,34 @@
     .custom-scrollbar::-webkit-scrollbar-thumb {
         background-color: rgba(156, 163, 175, 0.3);
         border-radius: 4px;
+    }
+
+    /* Week slide animations */
+    :global(.slide-from-right) {
+        animation: slideInRight 0.28s ease-out;
+    }
+    :global(.slide-from-left) {
+        animation: slideInLeft 0.28s ease-out;
+    }
+
+    @keyframes slideInRight {
+        from {
+            opacity: 0.6;
+            transform: translateX(40px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    @keyframes slideInLeft {
+        from {
+            opacity: 0.6;
+            transform: translateX(-40px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
     }
 </style>

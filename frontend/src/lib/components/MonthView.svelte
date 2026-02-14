@@ -28,7 +28,6 @@
     function getEventsForDay(dateStr: string): CalendarEvent[] {
         return events.filter((e) => getDatePart(e.start) === dateStr);
     }
-
 </script>
 
 <div
@@ -52,7 +51,9 @@
                 class="border-b border-r border-base-200 min-h-[100px] p-1 relative transition-colors hover:bg-base-200/30 group
                 {!isCurrentMonth ? 'bg-base-200/10 text-base-content/30' : ''}
                 {isToday ? 'bg-primary/5' : ''}
-                {selectedDate === dateStr ? 'ring-2 ring-primary ring-inset' : ''}"
+                {selectedDate === dateStr
+                    ? 'ring-2 ring-primary ring-inset'
+                    : ''}"
                 on:click={() => dispatch("dayClick", dateStr)}
             >
                 <!-- Date Number -->
@@ -74,8 +75,10 @@
                         <div
                             class="text-xs truncate px-1.5 py-0.5 rounded cursor-pointer text-primary-content font-medium border-l-2"
                             style="
-                                background-color: {event.color || defaultEventColor}33;
-                                border-left-color: {event.color || defaultEventColor};
+                                background-color: {event.color ||
+                                defaultEventColor}33;
+                                border-left-color: {event.color ||
+                                defaultEventColor};
                             "
                             on:click|stopPropagation={() =>
                                 dispatch("eventClick", event)}
@@ -89,7 +92,7 @@
                         <div
                             class="text-xs text-center text-base-content/50 font-medium hover:text-primary cursor-pointer"
                         >
-                            + {getEventsForDay(dateStr).length - 4} mais
+                            + {getEventsForDay(dateStr).length - 4} more
                         </div>
                     {/if}
                 </div>
