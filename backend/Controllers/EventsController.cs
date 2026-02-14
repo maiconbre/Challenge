@@ -36,6 +36,7 @@ public class EventsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<IActionResult> Update(string id, CalendarEvent updatedEvent)
     {
+        updatedEvent.Id = id;
         return await _eventService.UpdateAsync(id, updatedEvent) ? NoContent() : NotFound();
     }
 

@@ -1,19 +1,25 @@
 <script lang="ts">
-    import { openCreateModal } from "$lib/stores";
+    import {
+        openCreateModal,
+        selectedDateStore,
+        setSelectedDate,
+    } from "$lib/stores";
+    import { formatDateISO } from "$lib/utils/dateUtils";
 
     const quickNotes = [
-        { label: "Reunião", icon: "💼" },
-        { label: "Aniversário", icon: "🎂" },
-        { label: "Lembrete", icon: "⏰" },
+        { label: "Meeting", icon: "💼" },
+        { label: "Birthday", icon: "🎂" },
+        { label: "Reminder", icon: "⏰" },
         { label: "Daily", icon: "📅" },
-        { label: "Evento", icon: "🎉" },
+        { label: "Event", icon: "🎉" },
     ];
 
     // Mini Calendar Logic
     let currentDate = new Date();
+
     $: year = currentDate.getFullYear();
     $: month = currentDate.getMonth();
-    $: monthLabel = currentDate.toLocaleString("default", {
+    $: monthLabel = currentDate.toLocaleString("en-US", {
         month: "long",
         year: "numeric",
     });
@@ -28,8 +34,11 @@
 
         // Prev month days
         for (let i = firstDay - 1; i >= 0; i--) {
+            const d = new Date(year, month - 1, prevMonthLastDate - i);
             days.push({
                 day: prevMonthLastDate - i,
+                date: d,
+                dateStr: formatDateISO(d),
                 current: false,
                 prev: true,
             });
@@ -39,6 +48,8 @@
         while (date.getMonth() === month) {
             days.push({
                 day: date.getDate(),
+                date: new Date(date),
+                dateStr: formatDateISO(date),
                 current: true,
                 today: isToday(date),
             });
@@ -48,7 +59,14 @@
         // Next month days (fill up to 42 for 6 rows)
         const remaining = 42 - days.length;
         for (let i = 1; i <= remaining; i++) {
-            days.push({ day: i, current: false, next: true });
+            const d = new Date(year, month + 1, i);
+            days.push({
+                day: i,
+                date: d,
+                dateStr: formatDateISO(d),
+                current: false,
+                next: true,
+            });
         }
         return days;
     }
@@ -67,6 +85,10 @@
     }
     function nextMonth() {
         currentDate = new Date(year, month + 1, 1);
+    }
+
+    function handleDateClick(dateStr: string) {
+        setSelectedDate(dateStr);
     }
 
     function handleCreate() {
@@ -102,7 +124,7 @@
                 stroke-linejoin="round"
             />
         </svg>
-        <span class="text-lg">Criar</span>
+        <span class="text-lg">Create</span>
     </button>
 
     <!-- Mini Calendar -->
@@ -149,21 +171,25 @@
         <div
             class="grid grid-cols-7 text-center text-[10px] text-base-content/60 mb-1"
         >
-            <span>D</span><span>S</span><span>T</span><span>Q</span><span
-                >Q</span
-            ><span>S</span><span>S</span>
+            <span>S</span><span>M</span><span>T</span><span>W</span><span
+                >T</span
+            ><span>F</span><span>S</span>
         </div>
         <div class="grid grid-cols-7 gap-y-1 text-center text-xs">
-            {#each days as { day, current, today }}
-                <div
-                    class="w-6 h-6 flex items-center justify-center rounded-full mx-auto
+            {#each days as { day, dateStr, current, today }}
+                <button
+                    class="w-6 h-6 flex items-center justify-center rounded-full mx-auto transition-colors
                     {current ? 'text-base-content' : 'text-base-content/30'}
                     {today
                         ? 'bg-primary text-primary-content'
-                        : 'hover:bg-base-200 cursor-pointer'}"
+                        : 'hover:bg-primary/20 cursor-pointer'}
+                    {$selectedDateStore === dateStr
+                        ? 'ring-2 ring-primary ring-offset-1'
+                        : ''}"
+                    on:click={() => handleDateClick(dateStr)}
                 >
                     {day}
-                </div>
+                </button>
             {/each}
         </div>
     </div>
@@ -173,7 +199,7 @@
         <h3
             class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3 px-2"
         >
-            Notas Rápidas
+            Quick Notes
         </h3>
         <ul class="menu bg-base-100 w-full p-0 gap-1">
             {#each quickNotes as note}

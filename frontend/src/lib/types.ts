@@ -3,6 +3,8 @@ export interface CalendarEvent {
     title: string;
     start: string;
     end: string;
+    color?: string;
+    location?: string;
 }
 
 export type NewCalendarEvent = Omit<CalendarEvent, 'id'>;

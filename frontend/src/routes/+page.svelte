@@ -11,510 +11,865 @@
         createModalStore,
         openCreateModal,
         closeCreateModal,
+        toastStore,
+        showToast,
+        selectedDateStore,
+        setSelectedDate,
     } from "$lib/stores";
+    import {
+        formatDateISO,
+        getTodayISO,
+        getMonthLabel,
+        getDatePart,
+        getTimePart,
+        addWeeks,
+        subWeeks,
+        addMonths,
+        subMonths,
+    } from "$lib/utils/dateUtils";
+
+    import WeekView from "$lib/components/WeekView.svelte";
+    import MonthView from "$lib/components/MonthView.svelte";
 
     let events: CalendarEvent[] = [];
     let currentDate = new Date();
+    let viewMode: "week" | "month" = "week";
     let loading = true;
+    let eventsVersion = 0;
+    const eventColors = [
+        "#3b82f6",
+        "#10b981",
+        "#f59e0b",
+        "#ef4444",
+        "#8b5cf6",
+        "#14b8a6",
+        "#f97316",
+    ];
+    const defaultEventColor = "#3b82f6";
 
-    // Modal state (Event Details only, Create is in store)
+    // Modal state
     let showEventModal = false;
     let selectedEvent: CalendarEvent | null = null;
+    let selectedEventColor = defaultEventColor;
+    let editStartDate = "";
+    let editStartTime = "";
+    let editEndDate = "";
+    let editEndTime = "";
+    let editLocation = "";
 
-    // Reactive calendar computations
+    // Confirmation Modal State
+    let showConfirmModal = false;
+    let pendingDropEvent: {
+        event: CalendarEvent;
+        newStart: Date;
+        newEnd: Date;
+    } | null = null;
 
-    // Reactive calendar computations
-    $: currentYear = currentDate.getFullYear();
-    $: currentMonth = currentDate.getMonth();
-    $: monthLabel = currentDate.toLocaleString("en-US", {
-        month: "long",
-        year: "numeric",
-    });
-    $: calendarDays = buildCalendarDays(currentYear, currentMonth);
+    // Header label
+    $: headerLabel = getMonthLabel(currentDate);
 
-    const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    // Store subscription
+    $: selectedDate = $selectedDateStore;
+    $: if (selectedDate) {
+        currentDate = new Date(`${selectedDate}T00:00:00`);
+    }
 
-    // --- Calendar Logic ---
-
-    function buildCalendarDays(
-        year: number,
-        month: number,
-    ): { day: number | null; dateStr: string }[] {
-        const firstDayOfWeek = new Date(year, month, 1).getDay();
-        const totalDays = new Date(year, month + 1, 0).getDate();
-        const days: { day: number | null; dateStr: string }[] = [];
-
-        // Previous month filler
-        for (let i = 0; i < firstDayOfWeek; i++) {
-            days.push({ day: null, dateStr: "" });
+    // Navigation
+    function prevPeriod(): void {
+        if (viewMode === "week") {
+            currentDate = subWeeks(currentDate, 1);
+        } else {
+            currentDate = subMonths(currentDate, 1);
         }
+    }
 
-        // Current month days
-        for (let d = 1; d <= totalDays; d++) {
-            const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-            days.push({ day: d, dateStr });
+    function nextPeriod(): void {
+        if (viewMode === "week") {
+            currentDate = addWeeks(currentDate, 1);
+        } else {
+            currentDate = addMonths(currentDate, 1);
         }
-        return days;
-    }
-
-    function getEventsForDay(dateStr: string): CalendarEvent[] {
-        if (!dateStr) return [];
-        return events.filter((e) => {
-            const d = e.start.split("T")[0];
-            return d === dateStr;
-        });
-    }
-
-    function isToday(dateStr: string): boolean {
-        if (!dateStr) return false;
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-        return dateStr === todayStr;
-    }
-
-    // --- Navigation ---
-
-    function prevMonth(): void {
-        currentDate = new Date(currentYear, currentMonth - 1, 1);
-    }
-
-    function nextMonth(): void {
-        currentDate = new Date(currentYear, currentMonth + 1, 1);
     }
 
     function goToday(): void {
-        currentDate = new Date();
+        const today = new Date();
+        currentDate = today;
+        setSelectedDate(getTodayISO());
     }
 
-    // --- Drag and Drop ---
-
-    let draggedEventId: string | null = null;
-
-    function handleDragStart(event: DragEvent, id: string) {
-        if (!id) return;
-        draggedEventId = id;
-        if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", id);
-        }
+    function formatDateTimeLocal(date: Date): string {
+        const dateStr = formatDateISO(date);
+        const hours = String(date.getHours()).padStart(2, "0");
+        const minutes = String(date.getMinutes()).padStart(2, "0");
+        return `${dateStr}T${hours}:${minutes}:00`;
     }
 
-    function handleDragOver(event: DragEvent) {
-        event.preventDefault(); // Necessary to allow dropping
-        if (event.dataTransfer) {
-            event.dataTransfer.dropEffect = "move";
-        }
-    }
+    // Drag & drop: receive event drop from WeekView
+    function handleEventDrop(
+        event: CustomEvent<{ event: CalendarEvent; newStart: Date }>,
+    ) {
+        const { event: calendarEvent, newStart } = event.detail;
 
-    async function handleDrop(event: DragEvent, targetDateStr: string) {
-        event.preventDefault();
-        const id = draggedEventId;
-        if (!id || !targetDateStr) return;
+        const originalStart = new Date(calendarEvent.start);
+        const originalEnd = new Date(calendarEvent.end);
+        const durationMs = originalEnd.getTime() - originalStart.getTime();
 
-        const originalEvent = events.find((e) => e.id === id);
-        if (!originalEvent) return;
-
-        // Calculate new start and end times preserving duration
-        const oldStart = new Date(originalEvent.start);
-        const oldEnd = new Date(originalEvent.end);
-        const durationMs = oldEnd.getTime() - oldStart.getTime();
-
-        const newStart = new Date(
-            `${targetDateStr}T${originalEvent.start.split("T")[1]}`,
-        );
         const newEnd = new Date(newStart.getTime() + durationMs);
 
-        // Optimistic UI update
-        const updatedEvent = {
-            ...originalEvent,
-            start: newStart.toISOString(),
-            end: newEnd.toISOString(),
+        pendingDropEvent = {
+            event: calendarEvent,
+            newStart,
+            newEnd,
         };
-
-        // Remove old event and add updated one immediately
-        events = events.map((e) => (e.id === id ? updatedEvent : e));
-
-        // API Call
-        const success = await updateEvent(id, {
-            start: updatedEvent.start, // Send as ISO string, backend should parse
-            end: updatedEvent.end,
-        });
-
-        if (!success) {
-            // Revert if API fails
-            events = events.map((e) => (e.id === id ? originalEvent : e));
-            alert("Failed to move event");
-        }
-
-        draggedEventId = null;
+        showConfirmModal = true;
     }
 
-    // --- Modals & CRUD ---
+    async function confirmDrop() {
+        if (!pendingDropEvent) return;
 
-    function openCreateForDay(dateStr?: string): void {
-        const d = dateStr || new Date().toISOString().split("T")[0];
-        // Use the store action
-        openCreateModal("", d);
+        const { event: calendarEvent, newStart, newEnd } = pendingDropEvent;
+
+        const updated = {
+            ...calendarEvent,
+            start: formatDateTimeLocal(newStart),
+            end: formatDateTimeLocal(newEnd),
+        };
+
+        // Optimistic update
+        events = events.map((e) => (e.id === calendarEvent.id ? updated : e));
+        eventsVersion += 1;
+
+        // Reset modal state immediately
+        showConfirmModal = false;
+        pendingDropEvent = null;
+
+        try {
+            // API Call
+            await updateEvent(updated);
+
+            showToast("Event updated successfully!", "success", 200);
+        } catch (error) {
+            // Revert
+            events = events.map((e) =>
+                e.id === calendarEvent.id ? calendarEvent : e,
+            );
+            eventsVersion += 1;
+            showToast("Error moving event", "error", 500);
+        }
+    }
+
+    function cancelDrop() {
+        showConfirmModal = false;
+        pendingDropEvent = null;
+    }
+
+    // Modal handlers
+    function openCreateForDay(dateStr?: string, hour?: number): void {
+        const d = dateStr || getTodayISO();
+        const h = hour !== undefined ? String(hour).padStart(2, "0") : "09";
+        const eh = (hour !== undefined ? hour + 1 : 10).toString();
+        openCreateModal("", d, h, eh);
     }
 
     function openEventDetails(event: CalendarEvent): void {
         selectedEvent = event;
+        selectedEventColor = event.color || defaultEventColor;
+        editStartDate = getDatePart(event.start);
+        editStartTime = getTimePart(event.start);
+        editEndDate = getDatePart(event.end);
+        editEndTime = getTimePart(event.end);
+        editLocation = event.location || "";
         showEventModal = true;
     }
 
-    async function handleCreate(): Promise<void> {
-        const { title, startDate, startTime, endDate, endTime } =
-            $createModalStore;
+    // Handle day click from views
+    function handleDayClick(dateStr: string) {
+        setSelectedDate(dateStr);
+        currentDate = new Date(dateStr + "T00:00:00");
+        viewMode = "week";
+    }
 
-        if (!title.trim() || !startDate || !endDate) return;
-        const created = await createEvent({
-            title: title.trim(),
-            start: `${startDate}T${startTime}:00`,
-            end: `${endDate}T${endTime}:00`,
-        });
-        if (created) {
-            events = [...events, created];
-            closeCreateModal();
+    // Wrapper for MonthView dispatch
+    function handleMonthDayClick(event: CustomEvent<string>) {
+        handleDayClick(event.detail);
+    }
+
+    // Wrapper for WeekView dispatch
+    function handleWeekDayClick(
+        event: CustomEvent<{ dateStr: string; hour: number }>,
+    ) {
+        openCreateForDay(event.detail.dateStr, event.detail.hour);
+    }
+
+    function handleWeekEdge(event: CustomEvent<{ direction: -1 | 1 }>) {
+        if (event.detail.direction === 1) {
+            currentDate = addWeeks(currentDate, 1);
+        } else {
+            currentDate = subWeeks(currentDate, 1);
+        }
+    }
+
+    async function handleCreate(): Promise<void> {
+        const {
+            title,
+            startDate,
+            startTime,
+            endDate,
+            endTime,
+            color,
+            location,
+        } = $createModalStore;
+
+        if (!title.trim() || !startDate || !endDate || !startTime || !endTime) {
+            showToast("Please fill all fields", "warning");
+            return;
+        }
+
+        try {
+            const created = await createEvent({
+                title: title.trim(),
+                start: `${startDate}T${startTime}:00`,
+                end: `${endDate}T${endTime}:00`,
+                color,
+                location: location.trim(),
+            });
+
+            if (created) {
+                events = [...events, created];
+
+                setSelectedDate(startDate);
+                currentDate = new Date(startDate + "T00:00:00");
+
+                showToast(
+                    `Event "${created.title}" created successfully!`,
+                    "success",
+                    200,
+                    4000,
+                );
+
+                closeCreateModal();
+            } else {
+                showToast(
+                    "Error creating event - empty server response",
+                    "error",
+                    500,
+                );
+            }
+        } catch (error) {
+            console.error("[handleCreate]", error);
+            showToast("Error creating event", "error", 500);
         }
     }
 
     async function handleDelete(): Promise<void> {
         if (!selectedEvent) return;
-        const ok = await deleteEvent(selectedEvent.id);
-        if (ok) {
-            events = events.filter((e) => e.id !== selectedEvent!.id);
-            showEventModal = false;
-            selectedEvent = null;
+
+        if (!confirm(`Delete event "${selectedEvent.title}"?`)) return;
+
+        const previousEvents = events;
+        const deletingEvent = selectedEvent;
+        events = events.filter((e) => e.id !== deletingEvent.id);
+        eventsVersion += 1;
+        showEventModal = false;
+        selectedEvent = null;
+
+        const success = await deleteEvent(deletingEvent.id);
+        if (success) {
+            showToast(
+                `Event "${deletingEvent.title}" deleted successfully!`,
+                "success",
+                200,
+                3000,
+            );
+        } else {
+            events = previousEvents;
+            eventsVersion += 1;
+            showToast("Error deleting event", "error", 500);
         }
+    }
+
+    async function handleEventUpdate(): Promise<void> {
+        if (!selectedEvent) return;
+        if (!editStartDate || !editStartTime || !editEndDate || !editEndTime) {
+            showToast("Fill date and time", "warning");
+            return;
+        }
+        const updatedStart = `${editStartDate}T${editStartTime}:00`;
+        const updatedEnd = `${editEndDate}T${editEndTime}:00`;
+        const startDate = new Date(updatedStart);
+        const endDate = new Date(updatedEnd);
+        if (
+            Number.isNaN(startDate.getTime()) ||
+            Number.isNaN(endDate.getTime()) ||
+            endDate <= startDate
+        ) {
+            showToast("Invalid period", "warning");
+            return;
+        }
+        const previous = selectedEvent;
+        const updated = {
+            ...selectedEvent,
+            start: updatedStart,
+            end: updatedEnd,
+            color: selectedEventColor,
+            location: editLocation.trim(),
+        };
+        events = events.map((e) => (e.id === updated.id ? updated : e));
+        eventsVersion += 1;
+        showEventModal = false;
+        selectedEvent = null;
+
+        try {
+            await updateEvent(updated);
+            showToast("Event updated successfully!", "success", 200);
+        } catch (error) {
+            events = events.map((e) => (e.id === previous.id ? previous : e));
+            eventsVersion += 1;
+            showToast("Error updating event", "error", 500);
+        }
+    }
+
+    function handleEventClick(event: CustomEvent<CalendarEvent>): void {
+        openEventDetails(event.detail);
     }
 
     onMount(async () => {
         events = await fetchEvents();
+        // If no date selected, select today?
+        if (!$selectedDateStore) {
+            setSelectedDate(getTodayISO());
+        }
         loading = false;
     });
 </script>
 
-<!-- Main Calendar Layout -->
-<!-- Header -->
-<header
-    class="flex-none flex items-center justify-between px-6 py-4 border-b border-base-200"
->
-    <div class="flex items-center gap-4">
-        <h2 class="text-2xl font-normal text-base-content">{monthLabel}</h2>
-        <div class="flex items-center gap-1 bg-base-200 rounded-full p-0.5">
-            <button
-                class="btn btn-sm btn-circle btn-ghost"
-                on:click={prevMonth}
-            >
-                <svg
-                    class="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M15 19l-7-7 7-7"
-                    ></path></svg
-                >
-            </button>
-            <button
-                class="btn btn-sm btn-ghost normal-case font-medium"
-                on:click={goToday}>Today</button
-            >
-            <button
-                class="btn btn-sm btn-circle btn-ghost"
-                on:click={nextMonth}
-            >
-                <svg
-                    class="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M9 5l7 7-7 7"
-                    ></path></svg
-                >
-            </button>
-        </div>
-    </div>
-    <div>
-        <!-- Right side header options (view switch, settings, etc.) could go here -->
-        <select class="select select-bordered select-sm">
-            <option>Month</option>
-            <option disabled>Week</option>
-            <option disabled>Day</option>
-        </select>
-    </div>
-</header>
-
-<!-- Calendar Grid -->
-<div class="flex-1 flex flex-col overflow-hidden relative">
-    <!-- Weekday Headers -->
-    <div
-        class="grid grid-cols-8 border-b border-base-200 bg-base-100 flex-none ml-14"
+<!-- Main Layout -->
+<div class="flex flex-col h-screen bg-base-100">
+    <!-- Header -->
+    <header
+        class="flex-none flex items-center justify-between px-6 py-4 border-b border-base-200"
     >
-        {#each WEEKDAYS as wd, i}
-            <div class="py-2 text-center border-l border-base-200">
-                <div
-                    class="text-xs font-semibold text-base-content/60 uppercase tracking-wider mb-1"
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-4">
+                <button
+                    class="btn btn-sm btn-outline px-4"
+                    on:click={goToday}
+                    title="Back to today"
                 >
-                    {wd}
-                </div>
-                <!-- Display date number for the current week (simplified for now to match current month view logic, but ideally this should be a week view) -->
-                <!-- For this specific challenge request "Google Calendar Time Grid", I will stick to a week-like view or day columns -->
-                <div class="text-2xl font-normal text-base-content/80">
-                    {calendarDays[i]?.day || ""}
-                </div>
-            </div>
-        {/each}
-    </div>
+                    Today
+                </button>
 
-    <!-- Time Grid Scrollable Area -->
-    <div class="flex-1 overflow-y-auto relative flex">
-        <!-- Time Labels Column -->
-        <div
-            class="w-14 flex-none bg-base-100 border-r border-base-200 text-xs text-base-content/60 text-right pr-2 pt-2 gap-[50px] flex flex-col"
-        >
-            {#each Array(24) as _, i}
-                <div class="h-[60px] relative -top-2">
-                    {String(i).padStart(2, "0")}:00
+                <!-- Navigation -->
+                <div class="flex items-center gap-1">
+                    <button
+                        class="btn btn-sm btn-ghost btn-circle"
+                        on:click={prevPeriod}
+                        title="Previous"
+                    >
+                        <svg
+                            class="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M15 19l-7-7 7-7"
+                            />
+                        </svg>
+                    </button>
+                    <button
+                        class="btn btn-sm btn-ghost btn-circle"
+                        on:click={nextPeriod}
+                        title="Next"
+                    >
+                        <svg
+                            class="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M9 5l7 7-7 7"
+                            />
+                        </svg>
+                    </button>
                 </div>
-            {/each}
+
+                <!-- Display formatted selected date -->
+                <h2 class="text-xl font-normal capitalize min-w-[200px]">
+                    {headerLabel}
+                </h2>
+            </div>
         </div>
 
-        <!-- Grid Lines & Events -->
-        <div class="flex-1 grid grid-cols-7 relative">
-            <!-- Background Grid Lines -->
-            <div
-                class="absolute inset-0 grid grid-rows-[repeat(24,60px)] z-0 pointer-events-none"
-            >
-                {#each Array(24) as _, i}
-                    <div class="border-b border-base-200 w-full h-[60px]"></div>
-                {/each}
-            </div>
-            <div
-                class="absolute inset-0 grid grid-cols-7 z-0 pointer-events-none"
-            >
-                {#each Array(7) as _, i}
-                    <div class="border-r border-base-200 w-full h-full"></div>
-                {/each}
-            </div>
+        <!-- View Switcher -->
+        <div class="flex items-center gap-2">
+            <!-- Removed search and settings buttons -->
 
-            <!-- Days Columns for Events -->
-            {#each Array(7) as _, dayIndex}
-                <!-- We use the first 7 days of the generated calendarDays for this week view demo, 
-                         or logic to select specific week. For now, taking first 7 for visualization as per prompt request structure over logic depth -->
-                {@const currentDayDateStr = calendarDays[dayIndex]?.dateStr}
-                <div
-                    class="relative h-[1440px] group z-10"
-                    on:drop={(e) => handleDrop(e, currentDayDateStr)}
-                    on:dragover={handleDragOver}
-                    on:click={(e) => {
-                        // Calculate time based on click Y position
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const y =
-                            e.clientY - rect.top + e.currentTarget.scrollTop; // Adjust for scroll if needed
-                        const hour = Math.floor(y / 60);
-                        openCreateForDay(currentDayDateStr);
-                    }}
+            <!-- View Mode Dropdown -->
+            <div class="dropdown dropdown-end z-50">
+                <label
+                    tabindex="0"
+                    class="btn btn-outline btn-sm m-1 min-w-[100px] justify-between"
                 >
-                    {#if currentDayDateStr}
-                        {#each getEventsForDay(currentDayDateStr) as ev (ev.id)}
-                            {@const startHour = parseInt(
-                                ev.start.split("T")[1].split(":")[0],
-                            )}
-                            {@const startMin = parseInt(
-                                ev.start.split("T")[1].split(":")[1],
-                            )}
-                            {@const endHour = parseInt(
-                                ev.end.split("T")[1].split(":")[0],
-                            )}
-                            {@const endMin = parseInt(
-                                ev.end.split("T")[1].split(":")[1],
-                            )}
-                            {@const top = startHour * 60 + startMin}
-                            {@const durationMinutes =
-                                endHour * 60 + endMin - top}
-                            {@const height = Math.max(durationMinutes, 30)}
-                            <!-- Min height -->
-
-                            <div
-                                class="absolute left-1 right-1 rounded px-2 py-1 text-xs font-medium cursor-pointer bg-primary/20 text-primary-content border-l-2 border-primary hover:brightness-110 z-20 overflow-hidden"
-                                style="top: {top}px; height: {height}px;"
-                                draggable="true"
-                                on:dragstart={(e) => handleDragStart(e, ev.id)}
-                                on:click|stopPropagation={() =>
-                                    openEventDetails(ev)}
-                            >
-                                <div class="font-bold">{ev.title}</div>
-                                <div>
-                                    {ev.start.split("T")[1].substring(0, 5)}
-                                    - {ev.end.split("T")[1].substring(0, 5)}
-                                </div>
-                            </div>
-                        {/each}
-                    {/if}
-                </div>
-            {/each}
+                    {viewMode === "week" ? "Week" : "Month"}
+                    <svg
+                        class="w-4 h-4 ml-1"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        ><path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 9l-7 7-7-7"
+                        /></svg
+                    >
+                </label>
+                <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+                <ul
+                    tabindex="0"
+                    class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-200"
+                >
+                    <li>
+                        <button
+                            class={viewMode === "week" ? "active" : ""}
+                            on:click={() => (viewMode = "week")}
+                            >Week <span class="text-xs opacity-50 ml-auto"
+                                >W</span
+                            ></button
+                        >
+                    </li>
+                    <li>
+                        <button
+                            class={viewMode === "month" ? "active" : ""}
+                            on:click={() => (viewMode = "month")}
+                            >Month <span class="text-xs opacity-50 ml-auto"
+                                >M</span
+                            ></button
+                        >
+                    </li>
+                </ul>
+            </div>
         </div>
-    </div>
+    </header>
+
+    {#if loading}
+        <div class="flex-1 flex items-center justify-center">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    {:else}
+        <!-- Main Content -->
+        <div class="flex-1 overflow-hidden relative p-4 flex flex-col">
+            {#key eventsVersion}
+                <!-- Week View -->
+                {#if viewMode === "week"}
+                    <WeekView
+                        {events}
+                        {currentDate}
+                        on:eventDrop={handleEventDrop}
+                        on:eventClick={handleEventClick}
+                        on:dayClick={handleWeekDayClick}
+                        on:weekEdge={handleWeekEdge}
+                    />
+
+                    <!-- Month View -->
+                {:else}
+                    <MonthView
+                        {events}
+                        {currentDate}
+                        on:eventClick={handleEventClick}
+                        on:dayClick={handleMonthDayClick}
+                    />
+                {/if}
+            {/key}
+            <!-- Removed Floating Action Button -->
+        </div>
+    {/if}
 </div>
 
 <!-- Create Event Modal -->
 {#if $createModalStore.isOpen}
-    <div class="modal modal-open">
-        <div class="modal-box">
-            <h3 class="text-lg font-bold">New Event</h3>
-            <div class="form-control mt-4 w-full">
-                <label class="label" for="evt-title">
-                    <span class="label-text">Title</span>
+    <div class="modal modal-open z-50">
+        <div
+            class="modal-box max-w-md"
+            role="dialog"
+            aria-labelledby="create-modal-title"
+        >
+            <h3 id="create-modal-title" class="text-lg font-bold mb-4">
+                Create Event
+            </h3>
+
+            <div class="form-control w-full">
+                <label class="label" for="event-title">
+                    <span class="label-text font-semibold">Title</span>
                 </label>
                 <input
-                    id="evt-title"
+                    id="event-title"
                     type="text"
                     bind:value={$createModalStore.title}
-                    placeholder="Meeting, Lunch…"
+                    placeholder="Ex: Meeting, Lunch..."
                     class="input input-bordered w-full"
+                    autofocus
                 />
             </div>
-            <div class="mt-2 grid grid-cols-2 gap-3">
+
+            <div class="mt-4 grid grid-cols-2 gap-3">
                 <div class="form-control">
-                    <label class="label" for="evt-sd">
-                        <span class="label-text">Start Date</span>
+                    <label class="label" for="event-start-date">
+                        <span class="label-text text-sm">Start Date</span>
                     </label>
                     <input
-                        id="evt-sd"
+                        id="event-start-date"
                         type="date"
                         bind:value={$createModalStore.startDate}
-                        class="input input-bordered"
+                        class="input input-bordered input-sm"
                     />
                 </div>
                 <div class="form-control">
-                    <label class="label" for="evt-st">
-                        <span class="label-text">Start Time</span>
+                    <label class="label" for="event-start-time">
+                        <span class="label-text text-sm">Start Time</span>
                     </label>
                     <input
-                        id="evt-st"
+                        id="event-start-time"
                         type="time"
                         bind:value={$createModalStore.startTime}
-                        class="input input-bordered"
+                        class="input input-bordered input-sm"
                     />
                 </div>
             </div>
-            <div class="mt-2 grid grid-cols-2 gap-3">
+
+            <div class="mt-3 grid grid-cols-2 gap-3">
                 <div class="form-control">
-                    <label class="label" for="evt-ed">
-                        <span class="label-text">End Date</span>
+                    <label class="label" for="event-end-date">
+                        <span class="label-text text-sm">End Date</span>
                     </label>
                     <input
-                        id="evt-ed"
+                        id="event-end-date"
                         type="date"
                         bind:value={$createModalStore.endDate}
-                        class="input input-bordered"
+                        class="input input-bordered input-sm"
                     />
                 </div>
                 <div class="form-control">
-                    <label class="label" for="evt-et">
-                        <span class="label-text">End Time</span>
+                    <label class="label" for="event-end-time">
+                        <span class="label-text text-sm">End Time</span>
                     </label>
                     <input
-                        id="evt-et"
+                        id="event-end-time"
                         type="time"
                         bind:value={$createModalStore.endTime}
-                        class="input input-bordered"
+                        class="input input-bordered input-sm"
                     />
                 </div>
             </div>
-            <div class="modal-action">
-                <button class="btn" on:click={closeCreateModal}>Cancel</button>
+
+            <div class="mt-4">
+                <div class="text-xs font-semibold text-base-content/60 mb-2">
+                    Event Color
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    {#each eventColors as color}
+                        <button
+                            class="w-7 h-7 rounded-full border border-base-200"
+                            style="background-color: {color}; box-shadow: {$createModalStore.color ===
+                            color
+                                ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
+                                : 'none'};"
+                            on:click={() =>
+                                ($createModalStore = {
+                                    ...$createModalStore,
+                                    color,
+                                })}
+                            aria-label="Select color"
+                        />
+                    {/each}
+                </div>
+            </div>
+
+            <div class="form-control mt-4">
+                <label class="label" for="event-location">
+                    <span class="label-text text-sm">Location</span>
+                </label>
+                <input
+                    id="event-location"
+                    type="text"
+                    bind:value={$createModalStore.location}
+                    class="input input-bordered input-sm"
+                    placeholder="Ex: Room 3"
+                />
+            </div>
+
+            <div class="modal-action mt-6">
+                <button class="btn btn-outline" on:click={closeCreateModal}
+                    >Cancel</button
+                >
                 <button class="btn btn-primary" on:click={handleCreate}
                     >Create</button
                 >
             </div>
         </div>
-        <div class="modal-backdrop" on:click={closeCreateModal}></div>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div class="modal-backdrop" on:click={closeCreateModal} />
     </div>
 {/if}
 
-<!-- Event Details Modal -->
-{#if showEventModal && selectedEvent}
-    <div class="modal modal-open">
+<!-- Confirmation Modal -->
+{#if showConfirmModal && pendingDropEvent}
+    <div class="modal modal-open z-50">
         <div class="modal-box">
-            <div class="flex justify-between items-start">
-                <h3 class="text-xl font-bold">{selectedEvent.title}</h3>
+            <h3 class="font-bold text-lg">Confirm Change</h3>
+            <p class="py-4">
+                Do you want to move the event <b
+                    >"{pendingDropEvent.event.title}"</b
+                >
+                to:
+                <br />
+                <b>
+                    {pendingDropEvent.newStart.toLocaleDateString("en-US")} at {pendingDropEvent.newStart.toLocaleTimeString(
+                        "en-US",
+                        { hour: "2-digit", minute: "2-digit" },
+                    )}
+                </b>
+                ?
+            </p>
+            <div class="modal-action">
+                <button class="btn btn-outline" on:click={cancelDrop}
+                    >Cancel</button
+                >
+                <button class="btn btn-primary" on:click={confirmDrop}
+                    >Confirm</button
+                >
+            </div>
+        </div>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div class="modal-backdrop" on:click={cancelDrop}></div>
+    </div>
+{/if}
+
+<!-- Event Update Modal -->
+{#if showEventModal && selectedEvent}
+    <div class="modal modal-open z-50">
+        <div
+            class="modal-box max-w-sm"
+            role="dialog"
+            aria-labelledby="event-details-title"
+        >
+            <div class="flex justify-between items-start mb-4">
+                <h3
+                    id="event-details-title"
+                    class="text-lg font-semibold text-base-content"
+                >
+                    {selectedEvent.title}
+                </h3>
                 <button
                     class="btn btn-sm btn-ghost btn-circle"
                     on:click={() => {
                         showEventModal = false;
                         selectedEvent = null;
-                    }}>✕</button
+                    }}
+                    aria-label="Close"
                 >
+                    ✕
+                </button>
             </div>
 
-            <div class="mt-4 space-y-3 text-sm">
-                <div class="flex items-center gap-2 text-base-content/70">
-                    <svg
-                        class="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                        ></path></svg
-                    >
-                    <span>
-                        {new Date(selectedEvent.start).toLocaleDateString()}
-                        {new Date(selectedEvent.start).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        })}
-                        -
-                        {new Date(selectedEvent.end).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                        })}
-                    </span>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div class="form-control">
+                    <label class="label" for="event-edit-start-date">
+                        <span class="label-text text-sm">Start Date</span>
+                    </label>
+                    <input
+                        id="event-edit-start-date"
+                        type="date"
+                        bind:value={editStartDate}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+                <div class="form-control">
+                    <label class="label" for="event-edit-start-time">
+                        <span class="label-text text-sm">Start Time</span>
+                    </label>
+                    <input
+                        id="event-edit-start-time"
+                        type="time"
+                        bind:value={editStartTime}
+                        class="input input-bordered input-sm"
+                    />
                 </div>
             </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div class="form-control">
+                    <label class="label" for="event-edit-end-date">
+                        <span class="label-text text-sm">End Date</span>
+                    </label>
+                    <input
+                        id="event-edit-end-date"
+                        type="date"
+                        bind:value={editEndDate}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+                <div class="form-control">
+                    <label class="label" for="event-edit-end-time">
+                        <span class="label-text text-sm">End Time</span>
+                    </label>
+                    <input
+                        id="event-edit-end-time"
+                        type="time"
+                        bind:value={editEndTime}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+            </div>
+
+            <div class="form-control mb-4">
+                <label class="label" for="event-edit-location">
+                    <span class="label-text text-sm">Location</span>
+                </label>
+                <input
+                    id="event-edit-location"
+                    type="text"
+                    bind:value={editLocation}
+                    class="input input-bordered input-sm"
+                    placeholder="Ex: Room 3"
+                />
+            </div>
+
+            <div class="mb-4">
+                <div class="text-xs font-semibold text-base-content/60 mb-2">
+                    Event Color
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    {#each eventColors as color}
+                        <button
+                            class="w-7 h-7 rounded-full border border-base-200"
+                            style="background-color: {color}; box-shadow: {selectedEventColor ===
+                            color
+                                ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
+                                : 'none'};"
+                            on:click={() => (selectedEventColor = color)}
+                            aria-label="Select color"
+                        />
+                    {/each}
+                </div>
+            </div>
+
             <div class="modal-action">
                 <button
-                    class="btn btn-outline btn-error btn-sm"
+                    class="btn btn-outline"
+                    on:click={() => {
+                        showEventModal = false;
+                        selectedEvent = null;
+                    }}
+                >
+                    Cancel
+                </button>
+                <button
+                    class="btn btn-error btn-outline"
                     on:click={handleDelete}
                 >
-                    <svg
-                        class="w-4 h-4 mr-1"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        ></path></svg
-                    >
                     Delete
+                </button>
+                <button class="btn btn-primary" on:click={handleEventUpdate}>
+                    Update
                 </button>
             </div>
         </div>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
             class="modal-backdrop"
             on:click={() => {
                 showEventModal = false;
                 selectedEvent = null;
             }}
-        ></div>
+        />
     </div>
 {/if}
 
+<!-- Toast Container -->
+<div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-md">
+    {#each $toastStore as toast (toast.id)}
+        <div
+            class="alert {toast.type === 'success'
+                ? 'alert-success'
+                : toast.type === 'error'
+                  ? 'alert-error'
+                  : toast.type === 'warning'
+                    ? 'alert-warning'
+                    : 'alert-info'} shadow-lg animate-in slide-in-from-right-4"
+        >
+            <div class="flex items-start gap-3">
+                <div>
+                    {#if toast.type === "success"}
+                        <svg
+                            class="h-6 w-6"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 13l4 4L19 7"
+                            />
+                        </svg>
+                    {:else if toast.type === "error"}
+                        <svg
+                            class="h-6 w-6"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12"
+                            />
+                        </svg>
+                    {:else}
+                        <svg
+                            class="h-6 w-6"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                    {/if}
+                </div>
+                <div class="flex-1">
+                    <p class="font-semibold">{toast.message}</p>
+                    {#if toast.status}
+                        <p class="text-xs opacity-75">
+                            HTTP {toast.status}
+                        </p>
+                    {/if}
+                </div>
+            </div>
+        </div>
+    {/each}
+</div>
+
 <style>
-    /* Add any custom Google-like stylings here if Tailwind isn't enough */
+    :global(html, body) {
+        height: 100%;
+    }
 </style>
