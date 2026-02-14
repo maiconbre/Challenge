@@ -1,9 +1,15 @@
 using Backend.Services;
 using MongoDB.Driver;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -23,6 +29,12 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod()
               .AllowAnyHeader();
     });
+});
+
+builder.Services.Configure<System.Text.Json.JsonSerializerOptions>(options =>
+{
+    options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.PropertyNameCaseInsensitive = true;
 });
 
 var app = builder.Build();

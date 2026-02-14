@@ -1,0 +1,311 @@
+<script lang="ts">
+    import { createEventDispatcher, onDestroy } from "svelte";
+    import type { CalendarEvent } from "$lib/types";
+    import { selectedDateStore } from "$lib/stores";
+    import {
+        HOURS,
+        PIXELS_PER_HOUR,
+        formatTime,
+        getTimePart,
+        getWeekDays,
+        formatDateISO,
+        getDatePart,
+        calculatePixelTop,
+        getHourAndMinute,
+    } from "$lib/utils/dateUtils";
+    import { format } from "date-fns";
+    import { ptBR } from "date-fns/locale";
+
+    export let events: CalendarEvent[] = [];
+    export let currentDate: Date;
+
+    const dispatch = createEventDispatcher<{
+        eventDrop: { event: CalendarEvent; newStart: Date };
+        eventClick: CalendarEvent;
+        dayClick: { dateStr: string; hour: number };
+    }>();
+
+    let weekDays: Date[] = [];
+    $: weekDays = getWeekDays(currentDate);
+    $: selectedDate = $selectedDateStore;
+
+    function getEventsForDay(date: Date): CalendarEvent[] {
+        const dateStr = formatDateISO(date);
+        return events.filter((e) => getDatePart(e.start) === dateStr);
+    }
+
+    function getEventTop(event: CalendarEvent) {
+        const { hour, minute } = getHourAndMinute(event.start);
+        return calculatePixelTop(hour, minute);
+    }
+
+    function getEventHeight(event: CalendarEvent) {
+        const start = new Date(event.start);
+        const end = new Date(event.end);
+        const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+        return Math.max(durationMinutes, 30);
+    }
+
+    // Drag and Drop State
+    let draggingId: string | null = null;
+    let initialY: number = 0;
+    let initialTop: number = 0;
+    let currentTop: number = 0;
+    let initialDayIndex: number = 0;
+    let currentDayIndex: number = 0;
+    let dragTranslateX: number = 0;
+    let gridEl: HTMLDivElement | null = null;
+    let timeAxisEl: HTMLDivElement | null = null;
+
+    function getDayWidth(): number {
+        if (!gridEl || !timeAxisEl || weekDays.length === 0) {
+            return 0;
+        }
+        const rect = gridEl.getBoundingClientRect();
+        const axisWidth = timeAxisEl.getBoundingClientRect().width;
+        const availableWidth = rect.width - axisWidth;
+        if (availableWidth <= 0) {
+            return 0;
+        }
+        return availableWidth / weekDays.length;
+    }
+
+    function getDayIndexFromMouse(clientX: number): number {
+        if (!gridEl || !timeAxisEl || weekDays.length === 0) {
+            return initialDayIndex;
+        }
+        const rect = gridEl.getBoundingClientRect();
+        const axisWidth = timeAxisEl.getBoundingClientRect().width;
+        const availableWidth = rect.width - axisWidth;
+        if (availableWidth <= 0) {
+            return initialDayIndex;
+        }
+        const x = clientX - rect.left - axisWidth;
+        const dayWidth = availableWidth / weekDays.length;
+        const index = Math.floor(x / dayWidth);
+        return Math.max(0, Math.min(weekDays.length - 1, index));
+    }
+
+    function handleMouseDown(e: MouseEvent, event: CalendarEvent) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        draggingId = event.id;
+        initialY = e.clientY;
+        initialTop = getEventTop(event);
+        currentTop = initialTop;
+        initialDayIndex = weekDays.findIndex(
+            (day) => formatDateISO(day) === getDatePart(event.start),
+        );
+        if (initialDayIndex < 0) {
+            initialDayIndex = 0;
+        }
+        currentDayIndex = initialDayIndex;
+        dragTranslateX = 0;
+
+        window.addEventListener("mousemove", handleWindowMouseMove);
+        window.addEventListener("mouseup", handleWindowMouseUp);
+    }
+
+    function handleWindowMouseMove(e: MouseEvent) {
+        if (!draggingId) return;
+
+        const deltaY = e.clientY - initialY;
+        const rawTop = initialTop + deltaY;
+
+        // Snap to hour (PIXELS_PER_HOUR)
+        const snapGrid = PIXELS_PER_HOUR;
+        currentTop = Math.round(rawTop / snapGrid) * snapGrid;
+        currentDayIndex = getDayIndexFromMouse(e.clientX);
+        const dayWidth = getDayWidth();
+        dragTranslateX = (currentDayIndex - initialDayIndex) * dayWidth;
+    }
+
+    function handleWindowMouseUp(e: MouseEvent) {
+        if (!draggingId) return;
+
+        const event = events.find((e) => e.id === draggingId);
+
+        window.removeEventListener("mousemove", handleWindowMouseMove);
+        window.removeEventListener("mouseup", handleWindowMouseUp);
+
+        if (event) {
+            const totalMinutes = (currentTop / PIXELS_PER_HOUR) * 60;
+            const newHour = Math.floor(totalMinutes / 60);
+            const newMinute = Math.floor(totalMinutes % 60);
+            const finalDayIndex = getDayIndexFromMouse(e.clientX);
+            const targetDay =
+                weekDays[finalDayIndex] || weekDays[initialDayIndex];
+            const hasTimeChange = currentTop !== initialTop;
+            const hasDayChange = finalDayIndex !== initialDayIndex;
+
+            if (hasTimeChange || hasDayChange) {
+                const newStart = new Date(event.start);
+                newStart.setFullYear(
+                    targetDay.getFullYear(),
+                    targetDay.getMonth(),
+                    targetDay.getDate(),
+                );
+                newStart.setHours(
+                    Math.max(0, Math.min(23, newHour)),
+                    newMinute,
+                    0,
+                    0,
+                );
+
+                dispatch("eventDrop", {
+                    event: event,
+                    newStart: newStart,
+                });
+            } else {
+                dispatch("eventClick", event);
+            }
+        }
+        draggingId = null;
+        dragTranslateX = 0;
+    }
+
+    onDestroy(() => {
+        if (typeof window !== "undefined") {
+            window.removeEventListener("mousemove", handleWindowMouseMove);
+            window.removeEventListener("mouseup", handleWindowMouseUp);
+        }
+    });
+</script>
+
+<div class="flex flex-col h-full bg-base-100 overflow-hidden select-none">
+    <!-- Header Weekdays -->
+    <div class="flex border-b border-base-200 pl-12 pr-4 bg-base-100/95 z-10">
+        {#each weekDays as day}
+            <div
+                class="flex-1 text-center py-2 border-l border-base-200 first:border-l-0"
+            >
+                <div
+                    class="text-xs uppercase font-semibold text-base-content/60"
+                >
+                    {format(day, "EEE", { locale: ptBR })}
+                </div>
+                <div
+                    class="text-lg font-normal rounded-full w-8 h-8 flex items-center justify-center mx-auto
+                    {formatDateISO(day) === formatDateISO(new Date())
+                        ? 'bg-primary text-primary-content'
+                        : ''}"
+                >
+                    {day.getDate()}
+                </div>
+            </div>
+        {/each}
+    </div>
+
+    <!-- Scrollable Grid -->
+    <div class="flex-1 overflow-y-auto relative custom-scrollbar">
+        <div
+            class="flex relative min-h-[1440px]"
+            style="height: {24 * PIXELS_PER_HOUR}px;"
+            bind:this={gridEl}
+        >
+            <!-- Time Axis -->
+            <div
+                class="w-12 flex-none border-r border-base-200 bg-base-100 sticky left-0 z-20"
+                bind:this={timeAxisEl}
+            >
+                {#each HOURS as hour}
+                    <div class="h-[60px] relative">
+                        <span
+                            class="absolute -top-3 right-1 text-xs text-base-content/50 pr-1"
+                        >
+                            {formatTime(hour)}
+                        </span>
+                    </div>
+                {/each}
+            </div>
+
+            <!-- Days Columns -->
+            {#each weekDays as day}
+                <div
+                    class="flex-1 border-l border-base-200 first:border-l-0 relative min-w-[120px]
+                    {selectedDate === formatDateISO(day)
+                        ? 'ring-1 ring-primary/40 ring-inset'
+                        : ''}"
+                >
+                    {#each HOURS as hour}
+                        <!-- Time Slot -->
+                        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+                        <div
+                            class="absolute w-full border-b border-base-200/50 h-[60px] group transition-colors hover:bg-base-200/20"
+                            style="top: {hour * PIXELS_PER_HOUR}px;"
+                            on:click={() =>
+                                dispatch("dayClick", {
+                                    dateStr: formatDateISO(day),
+                                    hour,
+                                })}
+                            role="gridcell"
+                            tabindex="0"
+                            aria-label="Time slot"
+                            on:keydown={() => {}}
+                        >
+                            <!-- Half hour hint -->
+                            <div
+                                class="absolute top-1/2 w-full border-t border-base-200/30 border-dashed"
+                            ></div>
+                        </div>
+                    {/each}
+
+                    <!-- Events for this day -->
+                    {#each getEventsForDay(day) as event (event.id)}
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div
+                            class="absolute left-1 right-1 rounded bg-primary/90 text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border border-primary-content/20"
+                            style="
+                                top: {draggingId === event.id
+                                ? currentTop
+                                : getEventTop(event)}px;
+                                height: {getEventHeight(event)}px;
+                                z-index: {draggingId === event.id ? 50 : 10};
+                                opacity: {draggingId === event.id ? 0.9 : 1};
+                                transform: {draggingId === event.id
+                                ? `translateX(${dragTranslateX}px) scale(1.02)`
+                                : 'scale(1)'};
+                                box-shadow: {draggingId === event.id
+                                ? '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                                : ''};
+                                transition: {draggingId === event.id
+                                ? 'none'
+                                : 'top 0.1s ease-out, background-color 0.15s ease'};
+                            "
+                            on:mousedown={(e) => handleMouseDown(e, event)}
+                            on:click|stopPropagation
+                            role="button"
+                            tabindex="0"
+                            on:keydown={() => {}}
+                        >
+                            <div class="font-bold truncate pointer-events-none">
+                                {event.title}
+                            </div>
+                            <div
+                                class="opacity-80 truncate pointer-events-none"
+                            >
+                                {getTimePart(event.start)} - {getTimePart(
+                                    event.end,
+                                )}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            {/each}
+        </div>
+    </div>
+</div>
+
+<style>
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: rgba(156, 163, 175, 0.3);
+        border-radius: 4px;
+    }
+</style>

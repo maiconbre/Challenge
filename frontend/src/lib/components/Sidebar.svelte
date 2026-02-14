@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { openCreateModal } from "$lib/stores";
+    import { openCreateModal, selectedDateStore, setSelectedDate } from "$lib/stores";
+    import { formatDateISO } from "$lib/utils/dateUtils";
 
     const quickNotes = [
         { label: "Reunião", icon: "💼" },
@@ -11,6 +12,9 @@
 
     // Mini Calendar Logic
     let currentDate = new Date();
+    // Subscribe to store to sync with main calendar if needed, or just push updates
+    // For now, let's just push updates when clicking
+    
     $: year = currentDate.getFullYear();
     $: month = currentDate.getMonth();
     $: monthLabel = currentDate.toLocaleString("default", {
@@ -28,8 +32,11 @@
 
         // Prev month days
         for (let i = firstDay - 1; i >= 0; i--) {
+            const d = new Date(year, month - 1, prevMonthLastDate - i);
             days.push({
                 day: prevMonthLastDate - i,
+                date: d,
+                dateStr: formatDateISO(d),
                 current: false,
                 prev: true,
             });
@@ -39,6 +46,8 @@
         while (date.getMonth() === month) {
             days.push({
                 day: date.getDate(),
+                date: new Date(date),
+                dateStr: formatDateISO(date),
                 current: true,
                 today: isToday(date),
             });
@@ -48,7 +57,14 @@
         // Next month days (fill up to 42 for 6 rows)
         const remaining = 42 - days.length;
         for (let i = 1; i <= remaining; i++) {
-            days.push({ day: i, current: false, next: true });
+            const d = new Date(year, month + 1, i);
+            days.push({ 
+                day: i, 
+                date: d,
+                dateStr: formatDateISO(d),
+                current: false, 
+                next: true 
+            });
         }
         return days;
     }
@@ -67,6 +83,10 @@
     }
     function nextMonth() {
         currentDate = new Date(year, month + 1, 1);
+    }
+
+    function handleDateClick(dateStr: string) {
+        setSelectedDate(dateStr);
     }
 
     function handleCreate() {
@@ -154,16 +174,18 @@
             ><span>S</span><span>S</span>
         </div>
         <div class="grid grid-cols-7 gap-y-1 text-center text-xs">
-            {#each days as { day, current, today }}
-                <div
-                    class="w-6 h-6 flex items-center justify-center rounded-full mx-auto
+            {#each days as { day, dateStr, current, today }}
+                <button
+                    class="w-6 h-6 flex items-center justify-center rounded-full mx-auto transition-colors
                     {current ? 'text-base-content' : 'text-base-content/30'}
                     {today
                         ? 'bg-primary text-primary-content'
-                        : 'hover:bg-base-200 cursor-pointer'}"
+                        : 'hover:bg-primary/20 cursor-pointer'}
+                    {$selectedDateStore === dateStr ? 'ring-2 ring-primary ring-offset-1' : ''}"
+                    on:click={() => handleDateClick(dateStr)}
                 >
                     {day}
-                </div>
+                </button>
             {/each}
         </div>
     </div>
