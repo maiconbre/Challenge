@@ -11,7 +11,9 @@ function normalizeEvent(event: any): CalendarEvent {
         id: event.id,
         title: event.title,
         start: event.start?.replace('Z', '') || event.start,
-        end: event.end?.replace('Z', '') || event.end
+        end: event.end?.replace('Z', '') || event.end,
+        color: event.color,
+        location: event.location
     };
 }
 
@@ -55,9 +57,9 @@ export async function deleteEvent(id: string): Promise<boolean> {
     }
 }
 
-export async function updateEvent(id: string, event: Partial<NewCalendarEvent>): Promise<boolean> {
+export async function updateEvent(event: CalendarEvent): Promise<boolean> {
     try {
-        const res = await fetch(`${API_BASE}/${id}`, {
+        const res = await fetch(`${API_BASE}/${event.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(event)

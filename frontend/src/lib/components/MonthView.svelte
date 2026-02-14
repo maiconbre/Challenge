@@ -20,6 +20,7 @@
     }>();
 
     let days: CalendarDay[] = [];
+    const defaultEventColor = "#3b82f6";
 
     $: days = buildCalendarMonth(currentDate);
     $: selectedDate = $selectedDateStore;
@@ -71,7 +72,11 @@
                     {#each getEventsForDay(dateStr).slice(0, 4) as event}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
                         <div
-                            class="text-xs truncate px-1.5 py-0.5 rounded cursor-pointer bg-primary/20 hover:bg-primary/40 text-primary-content font-medium border-l-2 border-primary"
+                            class="text-xs truncate px-1.5 py-0.5 rounded cursor-pointer text-primary-content font-medium border-l-2"
+                            style="
+                                background-color: {event.color || defaultEventColor}33;
+                                border-left-color: {event.color || defaultEventColor};
+                            "
                             on:click|stopPropagation={() =>
                                 dispatch("eventClick", event)}
                             title="{event.title} ({getTimePart(event.start)})"

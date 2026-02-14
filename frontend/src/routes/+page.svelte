@@ -46,10 +46,26 @@
     let viewMode: "week" | "month" = "week";
     let loading = true;
     let eventsVersion = 0;
+    const eventColors = [
+        "#3b82f6",
+        "#10b981",
+        "#f59e0b",
+        "#ef4444",
+        "#8b5cf6",
+        "#14b8a6",
+        "#f97316",
+    ];
+    const defaultEventColor = "#3b82f6";
 
     // Modal state
     let showEventModal = false;
     let selectedEvent: CalendarEvent | null = null;
+    let selectedEventColor = defaultEventColor;
+    let editStartDate = "";
+    let editStartTime = "";
+    let editEndDate = "";
+    let editEndTime = "";
+    let editLocation = "";
 
     // Confirmation Modal State
     let showConfirmModal = false;
@@ -168,10 +184,7 @@
 
         try {
             // API Call
-            await updateEvent(calendarEvent.id, {
-                start: updated.start,
-                end: updated.end,
-            });
+            await updateEvent(updated);
 
             showToast("Evento atualizado com sucesso!", "success", 200);
         } catch (error) {
@@ -199,6 +212,12 @@
 
     function openEventDetails(event: CalendarEvent): void {
         selectedEvent = event;
+        selectedEventColor = event.color || defaultEventColor;
+        editStartDate = getDatePart(event.start);
+        editStartTime = getTimePart(event.start);
+        editEndDate = getDatePart(event.end);
+        editEndTime = getTimePart(event.end);
+        editLocation = event.location || "";
         showEventModal = true;
     }
 
@@ -224,8 +243,16 @@
         openCreateForDay(event.detail.dateStr, event.detail.hour);
     }
 
+    function handleWeekEdge(event: CustomEvent<{ direction: -1 | 1 }>) {
+        if (event.detail.direction === 1) {
+            currentDate = addWeeks(currentDate, 1);
+        } else {
+            currentDate = subWeeks(currentDate, 1);
+        }
+    }
+
     async function handleCreate(): Promise<void> {
-        const { title, startDate, startTime, endDate, endTime } =
+        const { title, startDate, startTime, endDate, endTime, color, location } =
             $createModalStore;
 
         if (!title.trim() || !startDate || !endDate || !startTime || !endTime) {
@@ -238,6 +265,8 @@
                 title: title.trim(),
                 start: `${startDate}T${startTime}:00`,
                 end: `${endDate}T${endTime}:00`,
+                color,
+                location: location.trim(),
             });
 
             if (created) {
@@ -276,21 +305,66 @@
 
         if (!confirm(`Deletar evento "${selectedEvent.title}"?`)) return;
 
-        const success = await deleteEvent(selectedEvent.id);
-        if (success) {
-            // Force explicit reactivity
-            events = events.filter((e) => e.id !== selectedEvent!.id);
+        const previousEvents = events;
+        const deletingEvent = selectedEvent;
+        events = events.filter((e) => e.id !== deletingEvent.id);
+        eventsVersion += 1;
+        showEventModal = false;
+        selectedEvent = null;
 
+        const success = await deleteEvent(deletingEvent.id);
+        if (success) {
             showToast(
-                `Evento "${selectedEvent.title}" deletado com sucesso!`,
+                `Evento "${deletingEvent.title}" deletado com sucesso!`,
                 "success",
                 200,
                 3000,
             );
-            showEventModal = false;
-            selectedEvent = null;
         } else {
+            events = previousEvents;
+            eventsVersion += 1;
             showToast("Erro ao deletar evento", "error", 500);
+        }
+    }
+
+    async function handleEventUpdate(): Promise<void> {
+        if (!selectedEvent) return;
+        if (!editStartDate || !editStartTime || !editEndDate || !editEndTime) {
+            showToast("Preencha data e hora", "warning");
+            return;
+        }
+        const updatedStart = `${editStartDate}T${editStartTime}:00`;
+        const updatedEnd = `${editEndDate}T${editEndTime}:00`;
+        const startDate = new Date(updatedStart);
+        const endDate = new Date(updatedEnd);
+        if (
+            Number.isNaN(startDate.getTime()) ||
+            Number.isNaN(endDate.getTime()) ||
+            endDate <= startDate
+        ) {
+            showToast("Período inválido", "warning");
+            return;
+        }
+        const previous = selectedEvent;
+        const updated = {
+            ...selectedEvent,
+            start: updatedStart,
+            end: updatedEnd,
+            color: selectedEventColor,
+            location: editLocation.trim(),
+        };
+        events = events.map((e) => (e.id === updated.id ? updated : e));
+        eventsVersion += 1;
+        showEventModal = false;
+        selectedEvent = null;
+
+        try {
+            await updateEvent(updated);
+            showToast("Evento atualizado com sucesso!", "success", 200);
+        } catch (error) {
+            events = events.map((e) => (e.id === previous.id ? previous : e));
+            eventsVersion += 1;
+            showToast("Erro ao atualizar evento", "error", 500);
         }
     }
 
@@ -441,6 +515,7 @@
                         on:eventDrop={handleEventDrop}
                         on:eventClick={handleEventClick}
                         on:dayClick={handleWeekDayClick}
+                        on:weekEdge={handleWeekEdge}
                     />
 
                     <!-- Month View -->
@@ -534,6 +609,41 @@
                 </div>
             </div>
 
+            <div class="mt-4">
+                <div class="text-xs font-semibold text-base-content/60 mb-2">
+                    Cor do evento
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    {#each eventColors as color}
+                        <button
+                            class="w-7 h-7 rounded-full border border-base-200"
+                            style="background-color: {color}; box-shadow: {$createModalStore.color === color
+                                ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
+                                : 'none'};"
+                            on:click={() =>
+                                ($createModalStore = {
+                                    ...$createModalStore,
+                                    color,
+                                })}
+                            aria-label="Selecionar cor"
+                        />
+                    {/each}
+                </div>
+            </div>
+
+            <div class="form-control mt-4">
+                <label class="label" for="event-location">
+                    <span class="label-text text-sm">Local</span>
+                </label>
+                <input
+                    id="event-location"
+                    type="text"
+                    bind:value={$createModalStore.location}
+                    class="input input-bordered input-sm"
+                    placeholder="Ex: Sala 3"
+                />
+            </div>
+
             <div class="modal-action mt-6">
                 <button class="btn btn-outline" on:click={closeCreateModal}
                     >Cancelar</button
@@ -581,7 +691,7 @@
     </div>
 {/if}
 
-<!-- Event Details Modal -->
+<!-- Event Update Modal -->
 {#if showEventModal && selectedEvent}
     <div class="modal modal-open z-50">
         <div
@@ -592,7 +702,7 @@
             <div class="flex justify-between items-start mb-4">
                 <h3
                     id="event-details-title"
-                    class="text-xl font-bold text-blue-600"
+                    class="text-lg font-semibold text-base-content"
                 >
                     {selectedEvent.title}
                 </h3>
@@ -608,72 +718,102 @@
                 </button>
             </div>
 
-            <div class="space-y-4">
-                <div class="flex items-start gap-3 text-sm">
-                    <svg
-                        class="w-5 h-5 text-base-content/60 mt-0.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M8 7V3m8 4V3m-9 8h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                        />
-                    </svg>
-                    <div>
-                        <div class="text-base-content/60 text-xs mb-1">
-                            Data e Hora
-                        </div>
-                        <div class="font-semibold">
-                            {new Date(selectedEvent.start).toLocaleDateString(
-                                "pt-BR",
-                            )}
-                        </div>
-                        <div class="text-sm text-base-content/80">
-                            {new Date(selectedEvent.start).toLocaleTimeString(
-                                "pt-BR",
-                                {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                },
-                            )}
-                            -
-                            {new Date(selectedEvent.end).toLocaleTimeString(
-                                "pt-BR",
-                                {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                },
-                            )}
-                        </div>
-                    </div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div class="form-control">
+                    <label class="label" for="event-edit-start-date">
+                        <span class="label-text text-sm">Data Início</span>
+                    </label>
+                    <input
+                        id="event-edit-start-date"
+                        type="date"
+                        bind:value={editStartDate}
+                        class="input input-bordered input-sm"
+                    />
                 </div>
+                <div class="form-control">
+                    <label class="label" for="event-edit-start-time">
+                        <span class="label-text text-sm">Hora Início</span>
+                    </label>
+                    <input
+                        id="event-edit-start-time"
+                        type="time"
+                        bind:value={editStartTime}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+            </div>
 
-                <div class="divider my-2" />
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div class="form-control">
+                    <label class="label" for="event-edit-end-date">
+                        <span class="label-text text-sm">Data Fim</span>
+                    </label>
+                    <input
+                        id="event-edit-end-date"
+                        type="date"
+                        bind:value={editEndDate}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+                <div class="form-control">
+                    <label class="label" for="event-edit-end-time">
+                        <span class="label-text text-sm">Hora Fim</span>
+                    </label>
+                    <input
+                        id="event-edit-end-time"
+                        type="time"
+                        bind:value={editEndTime}
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+            </div>
+
+            <div class="form-control mb-4">
+                <label class="label" for="event-edit-location">
+                    <span class="label-text text-sm">Local</span>
+                </label>
+                <input
+                    id="event-edit-location"
+                    type="text"
+                    bind:value={editLocation}
+                    class="input input-bordered input-sm"
+                    placeholder="Ex: Sala 3"
+                />
+            </div>
+
+            <div class="mb-4">
+                <div class="text-xs font-semibold text-base-content/60 mb-2">
+                    Cor do evento
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    {#each eventColors as color}
+                        <button
+                            class="w-7 h-7 rounded-full border border-base-200"
+                            style="background-color: {color}; box-shadow: {selectedEventColor === color
+                                ? '0 0 0 2px rgba(59, 130, 246, 0.5)'
+                                : 'none'};"
+                            on:click={() => (selectedEventColor = color)}
+                            aria-label="Selecionar cor"
+                        />
+                    {/each}
+                </div>
             </div>
 
             <div class="modal-action">
                 <button
-                    class="btn btn-outline btn-error btn-sm"
-                    on:click={handleDelete}
+                    class="btn btn-outline"
+                    on:click={() => {
+                        showEventModal = false;
+                        selectedEvent = null;
+                    }}
                 >
-                    <svg
-                        class="w-4 h-4 mr-1"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                    </svg>
-                    Deletar
+                    Cancelar
+                </button>
+                <button class="btn btn-error btn-outline" on:click={handleDelete}>
+                    Excluir
+                </button>
+                <button class="btn btn-primary" on:click={handleEventUpdate}>
+                    Atualizar
                 </button>
             </div>
         </div>

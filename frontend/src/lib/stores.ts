@@ -7,7 +7,9 @@ export const createModalStore = writable({
     startDate: '',
     endDate: '',
     startTime: '09:00',
-    endTime: '10:00'
+    endTime: '10:00',
+    color: '#3b82f6',
+    location: ''
 });
 
 export function openCreateModal(title: string = '', date: string = '', startHour: string = '09', endHour: string = '10') {
@@ -21,7 +23,9 @@ export function openCreateModal(title: string = '', date: string = '', startHour
         startDate: d,
         endDate: d,
         startTime: startTime,
-        endTime: endTime
+        endTime: endTime,
+        color: '#3b82f6',
+        location: ''
     });
 }
 
@@ -32,7 +36,9 @@ export function closeCreateModal() {
         startDate: '',
         endDate: '',
         startTime: '09:00',
-        endTime: '10:00'
+        endTime: '10:00',
+        color: '#3b82f6',
+        location: ''
     });
 }
 
