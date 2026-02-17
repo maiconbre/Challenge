@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { createEventDispatcher, onDestroy, tick } from "svelte";
+    import { createEventDispatcher, onDestroy, onMount, tick } from "svelte";
     import type { CalendarEvent } from "$lib/types";
     import { selectedDateStore } from "$lib/stores";
 
@@ -22,7 +22,7 @@
     const dispatch = createEventDispatcher<{
         eventDrop: { event: CalendarEvent; newStart: Date };
         eventClick: CalendarEvent;
-        dayClick: { dateStr: string; hour: number };
+        dayClick: { dateStr: string; hour: number; minute: number };
         weekEdge: { direction: -1 | 1 };
     }>();
 
@@ -30,7 +30,57 @@
     $: weekDays = getWeekDays(currentDate);
     $: selectedDate = $selectedDateStore;
 
-    const defaultEventColor = "#3b82f6";
+    const defaultEventColor = "#8ab4f8";
+
+    // Snap interval in minutes (30min = half hour)
+    const SNAP_MINUTES = 30;
+    const PIXELS_PER_SNAP = PIXELS_PER_HOUR / (60 / SNAP_MINUTES);
+
+    // Current time indicator
+    let currentTimeTop = 0;
+    let currentTimeDayIndex = -1;
+    let timeIntervalId: ReturnType<typeof setInterval>;
+
+    function updateCurrentTime() {
+        const now = new Date();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        currentTimeTop = calculatePixelTop(hour, minute);
+
+        const todayStr = formatDateISO(now);
+        currentTimeDayIndex = weekDays.findIndex(
+            (day) => formatDateISO(day) === todayStr,
+        );
+    }
+
+    $: if (weekDays.length > 0) {
+        updateCurrentTime();
+    }
+
+    // Scroll state
+    let scrollContainer: HTMLDivElement;
+
+    export function scrollToNow() {
+        if (scrollContainer && currentTimeTop > 0) {
+            const containerHeight = scrollContainer.clientHeight;
+            // Center the time: top - half height
+            const targetTop = Math.max(0, currentTimeTop - containerHeight / 2);
+            scrollContainer.scrollTo({ top: targetTop, behavior: "smooth" });
+        }
+    }
+
+    onMount(() => {
+        updateCurrentTime();
+        // Wait for DOM
+        tick().then(() => {
+            scrollToNow();
+        });
+        timeIntervalId = setInterval(updateCurrentTime, 60000);
+    });
+
+    onDestroy(() => {
+        if (timeIntervalId) clearInterval(timeIntervalId);
+    });
 
     // Slide animation state
     let slideClass = "";
@@ -43,7 +93,6 @@
             const direction =
                 currentDate > oldDate ? "slide-from-right" : "slide-from-left";
             slideClass = direction;
-            // Remove the class after animation completes
             tick().then(() => {
                 setTimeout(() => {
                     slideClass = "";
@@ -53,9 +102,29 @@
         prevDateKey = newKey;
     }
 
-    function getEventsForDay(date: Date): CalendarEvent[] {
+    // Reactively index events by day for O(1) lookups and ensured reactivity
+    let eventsByDay: Record<string, CalendarEvent[]> = {};
+    $: {
+        eventsByDay = {};
+        console.log(
+            "[WeekView] Recalculating eventsByDay. Total events:",
+            events.length,
+        );
+        events.forEach((e) => {
+            const dateStr = getDatePart(e.start);
+            if (!eventsByDay[dateStr]) {
+                eventsByDay[dateStr] = [];
+            }
+            eventsByDay[dateStr].push(e);
+        });
+    }
+
+    function getEventsForDay(
+        date: Date,
+        _cache: Record<string, CalendarEvent[]>,
+    ): CalendarEvent[] {
         const dateStr = formatDateISO(date);
-        return events.filter((e) => getDatePart(e.start) === dateStr);
+        return _cache[dateStr] || [];
     }
 
     function getEventTop(event: CalendarEvent) {
@@ -67,7 +136,10 @@
         const start = new Date(event.start);
         const end = new Date(event.end);
         const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
-        return Math.max(durationMinutes, 30);
+        return Math.max(
+            (durationMinutes / 60) * PIXELS_PER_HOUR,
+            PIXELS_PER_SNAP,
+        );
     }
 
     // Drag and Drop State
@@ -85,28 +157,21 @@
     const edgeThreshold = 32;
 
     function getDayWidth(): number {
-        if (!gridEl || !timeAxisEl || weekDays.length === 0) {
-            return 0;
-        }
+        if (!gridEl || !timeAxisEl || weekDays.length === 0) return 0;
         const rect = gridEl.getBoundingClientRect();
         const axisWidth = timeAxisEl.getBoundingClientRect().width;
         const availableWidth = rect.width - axisWidth;
-        if (availableWidth <= 0) {
-            return 0;
-        }
+        if (availableWidth <= 0) return 0;
         return availableWidth / weekDays.length;
     }
 
     function getDayIndexFromMouse(clientX: number): number {
-        if (!gridEl || !timeAxisEl || weekDays.length === 0) {
+        if (!gridEl || !timeAxisEl || weekDays.length === 0)
             return initialDayIndex;
-        }
         const rect = gridEl.getBoundingClientRect();
         const axisWidth = timeAxisEl.getBoundingClientRect().width;
         const availableWidth = rect.width - axisWidth;
-        if (availableWidth <= 0) {
-            return initialDayIndex;
-        }
+        if (availableWidth <= 0) return initialDayIndex;
         const x = clientX - rect.left - axisWidth;
         const dayWidth = availableWidth / weekDays.length;
         const index = Math.floor(x / dayWidth);
@@ -114,19 +179,13 @@
     }
 
     function getEdgeDirection(clientX: number): -1 | 1 | 0 {
-        if (!gridEl || !timeAxisEl) {
-            return 0;
-        }
+        if (!gridEl || !timeAxisEl) return 0;
         const rect = gridEl.getBoundingClientRect();
         const axisWidth = timeAxisEl.getBoundingClientRect().width;
         const leftEdge = rect.left + axisWidth;
         const rightEdge = rect.right;
-        if (clientX <= leftEdge + edgeThreshold) {
-            return -1;
-        }
-        if (clientX >= rightEdge - edgeThreshold) {
-            return 1;
-        }
+        if (clientX <= leftEdge + edgeThreshold) return -1;
+        if (clientX >= rightEdge - edgeThreshold) return 1;
         return 0;
     }
 
@@ -142,9 +201,7 @@
         initialDayIndex = weekDays.findIndex(
             (day) => formatDateISO(day) === getDatePart(event.start),
         );
-        if (initialDayIndex < 0) {
-            initialDayIndex = 0;
-        }
+        if (initialDayIndex < 0) initialDayIndex = 0;
         currentDayIndex = initialDayIndex;
         dragTranslateX = 0;
         hasSwitchedWeek = false;
@@ -159,16 +216,20 @@
         const deltaY = e.clientY - initialY;
         const rawTop = initialTop + deltaY;
 
-        // Snap to hour (PIXELS_PER_HOUR)
-        const snapGrid = PIXELS_PER_HOUR;
-        currentTop = Math.round(rawTop / snapGrid) * snapGrid;
+        // Snap to 30-minute intervals
+        currentTop = Math.round(rawTop / PIXELS_PER_SNAP) * PIXELS_PER_SNAP;
+        // Clamp to grid bounds
+        currentTop = Math.max(
+            0,
+            Math.min(currentTop, 24 * PIXELS_PER_HOUR - PIXELS_PER_SNAP),
+        );
+
         currentDayIndex = getDayIndexFromMouse(e.clientX);
         const dayWidth = getDayWidth();
         dragTranslateX = (currentDayIndex - initialDayIndex) * dayWidth;
 
         const direction = getEdgeDirection(e.clientX);
 
-        // Single switch per drag session
         if (direction !== 0 && !hasSwitchedWeek) {
             hasSwitchedWeek = true;
             initialDayIndex = currentDayIndex;
@@ -180,7 +241,8 @@
     function handleWindowMouseUp(e: MouseEvent) {
         if (!draggingId) return;
 
-        const event = draggingEvent || events.find((e) => e.id === draggingId);
+        const event =
+            draggingEvent || events.find((ev) => ev.id === draggingId);
 
         window.removeEventListener("mousemove", handleWindowMouseMove);
         window.removeEventListener("mouseup", handleWindowMouseUp);
@@ -188,7 +250,7 @@
         if (event) {
             const totalMinutes = (currentTop / PIXELS_PER_HOUR) * 60;
             const newHour = Math.floor(totalMinutes / 60);
-            const newMinute = Math.floor(totalMinutes % 60);
+            const newMinute = Math.round(totalMinutes % 60);
             const finalDayIndex = getDayIndexFromMouse(e.clientX);
             const targetDay =
                 weekDays[finalDayIndex] || weekDays[initialDayIndex];
@@ -228,25 +290,56 @@
             window.removeEventListener("mouseup", handleWindowMouseUp);
         }
     });
+
+    // 30-minute slot click handler
+    function handleSlotClick(day: Date, hour: number, half: 0 | 1) {
+        const minute = half * 30;
+        dispatch("dayClick", {
+            dateStr: formatDateISO(day),
+            hour,
+            minute,
+        });
+    }
+
+    // Format time label for 30min slots
+    function formatSlotTime(hour: number, half: 0 | 1): string {
+        const h = hour.toString().padStart(2, "0");
+        const m = half === 0 ? "00" : "30";
+        return `${h}:${m}`;
+    }
 </script>
 
-<div class="flex flex-col h-full bg-base-100 overflow-hidden select-none">
+<div
+    class="flex flex-col h-full overflow-hidden select-none"
+    style="background-color: var(--gcal-bg);"
+    data-testid="week-view"
+>
     <!-- Header Weekdays -->
-    <div class="flex border-b border-base-200 pl-12 pr-4 bg-base-100/95 z-10">
+    <div
+        class="flex pl-14 pr-2 flex-shrink-0"
+        style="border-bottom: 1px solid var(--gcal-border);"
+    >
         {#each weekDays as day}
             <div
-                class="flex-1 text-center py-2 border-l border-base-200 first:border-l-0"
+                class="flex-1 text-center py-2"
+                style="border-left: 1px solid var(--gcal-border);"
+                data-testid="day-header"
             >
                 <div
-                    class="text-xs uppercase font-semibold text-base-content/60"
+                    class="text-[11px] font-medium tracking-wide"
+                    style="color: {formatDateISO(day) ===
+                    formatDateISO(new Date())
+                        ? 'var(--gcal-blue)'
+                        : 'var(--gcal-text-muted)'};"
                 >
-                    {formatDayAbbrev(day)}
+                    {formatDayAbbrev(day).toUpperCase()}
                 </div>
                 <div
-                    class="text-lg font-normal rounded-full w-8 h-8 flex items-center justify-center mx-auto
-                    {formatDateISO(day) === formatDateISO(new Date())
-                        ? 'bg-primary text-primary-content'
-                        : ''}"
+                    class="text-2xl font-normal mx-auto flex items-center justify-center"
+                    style="width: 44px; height: 44px; border-radius: 50%;
+                        {formatDateISO(day) === formatDateISO(new Date())
+                        ? 'background-color: var(--gcal-today-bg); color: white; font-weight: 500;'
+                        : `color: var(--gcal-text); cursor: pointer;`}"
                 >
                     {day.getDate()}
                 </div>
@@ -255,128 +348,240 @@
     </div>
 
     <!-- Scrollable Grid -->
-    <div class="flex-1 overflow-y-auto relative custom-scrollbar">
+    <div
+        class="flex-1 overflow-y-auto relative no-scrollbar"
+        bind:this={scrollContainer}
+    >
         <div
-            class="flex relative min-h-[1440px] {slideClass}"
-            style="height: {24 * PIXELS_PER_HOUR}px;"
+            class="flex relative {slideClass}"
+            style="height: {24 * PIXELS_PER_HOUR}px; min-height: {24 *
+                PIXELS_PER_HOUR}px;"
             bind:this={gridEl}
         >
+            <!-- Time Axis -->
             <div
-                class="w-12 flex-none border-r border-base-200 bg-base-100 sticky left-0 z-20"
+                class="flex-none sticky left-0 z-20"
+                style="width: 56px; border-right: 1px solid var(--gcal-border); background-color: var(--gcal-bg);"
                 bind:this={timeAxisEl}
             >
                 {#each HOURS as hour}
-                    <div class="h-[60px] relative">
-                        <span
-                            class="absolute -top-3 right-1 text-xs text-base-content/50 pr-1"
-                        >
-                            {formatTime(hour)}
-                        </span>
+                    <div class="relative" style="height: {PIXELS_PER_HOUR}px;">
+                        {#if hour > 0}
+                            <span
+                                class="absolute right-2 text-[10px]"
+                                style="top: -7px; color: var(--gcal-text-muted);"
+                            >
+                                {formatTime(hour)}
+                            </span>
+                        {/if}
                     </div>
                 {/each}
+
+                <!-- Current Time Dot on axis -->
+                {#if currentTimeDayIndex >= 0}
+                    <div
+                        class="absolute right-0 z-30"
+                        style="top: {currentTimeTop - 5}px;"
+                    >
+                        <div
+                            style="width: 10px; height: 10px; border-radius: 50%; background-color: #ea4335; position: absolute; right: -5px;"
+                        ></div>
+                    </div>
+                {/if}
             </div>
 
+            <!-- Day Columns -->
             {#each weekDays as day, dayIndex}
                 <div
-                    class="flex-1 border-l border-base-200 first:border-l-0 relative min-w-[120px]
-                        {selectedDate === formatDateISO(day)
-                        ? 'ring-1 ring-primary/40 ring-inset'
-                        : ''}"
+                    class="flex-1 relative"
+                    style="border-left: 1px solid var(--gcal-border); min-width: 120px;"
                 >
+                    <!-- 30-minute slots (2 per hour) -->
                     {#each HOURS as hour}
+                        <!-- First half: :00 - :30 -->
                         <div
-                            class="absolute w-full border-b border-base-200/50 h-[60px] group transition-colors hover:bg-base-200/20"
-                            style="top: {hour * PIXELS_PER_HOUR}px;"
-                            on:click={() =>
-                                dispatch("dayClick", {
-                                    dateStr: formatDateISO(day),
-                                    hour,
-                                })}
+                            class="absolute w-full slot-half"
+                            style="top: {hour *
+                                PIXELS_PER_HOUR}px; height: {PIXELS_PER_SNAP}px; border-bottom: 1px dashed var(--gcal-border-subtle);"
+                            on:click={() => handleSlotClick(day, hour, 0)}
                             role="gridcell"
                             tabindex="0"
-                            aria-label="Time slot"
-                            on:keydown={() => {}}
+                            aria-label="{formatSlotTime(hour, 0)} slot"
+                            data-testid="time-slot"
+                            on:keydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    handleSlotClick(day, hour, 0);
+                                    e.preventDefault();
+                                }
+                            }}
                         >
-                            <div
-                                class="absolute top-1/2 w-full border-t border-base-200/30 border-dashed"
-                            ></div>
+                            <div class="slot-hover"></div>
+                        </div>
+                        <!-- Second half: :30 - :00 -->
+                        <div
+                            class="absolute w-full slot-half"
+                            style="top: {hour * PIXELS_PER_HOUR +
+                                PIXELS_PER_SNAP}px; height: {PIXELS_PER_SNAP}px; border-bottom: 1px solid var(--gcal-border-subtle);"
+                            on:click={() => handleSlotClick(day, hour, 1)}
+                            role="gridcell"
+                            tabindex="0"
+                            aria-label="{formatSlotTime(hour, 1)} slot"
+                            on:keydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    handleSlotClick(day, hour, 1);
+                                    e.preventDefault();
+                                }
+                            }}
+                        >
+                            <div class="slot-hover"></div>
                         </div>
                     {/each}
 
-                    {#each getEventsForDay(day) as event (event.id)}
+                    <!-- Current Time Line -->
+                    {#if currentTimeDayIndex === dayIndex}
                         <div
-                            class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border"
+                            class="current-time-line"
+                            style="top: {currentTimeTop}px;"
+                        >
+                            <div class="current-time-dot"></div>
+                        </div>
+                    {/if}
+
+                    <!-- Events -->
+                    {#each getEventsForDay(day, eventsByDay) as event (event.id)}
+                        {@const height = getEventHeight(event)}
+                        {@const isSmall = height <= 30}
+                        <div
+                            class="absolute rounded cursor-move z-10 overflow-hidden text-xs event-card"
                             style="
-                                    top: {draggingId === event.id
+                                left: 2px;
+                                right: 2px;
+                                top: {draggingId === event.id
                                 ? currentTop
                                 : getEventTop(event)}px;
-                                    height: {getEventHeight(event)}px;
-                                    z-index: {draggingId === event.id
-                                ? 50
-                                : 10};
-                                    opacity: {draggingId === event.id
-                                ? 0.9
-                                : 1};
-                                    transform: {draggingId === event.id
+                                height: {height}px;
+                                z-index: {draggingId === event.id ? 50 : 10};
+                                opacity: {draggingId === event.id ? 0.9 : 1};
+                                transform: {draggingId === event.id
                                 ? `translateX(${dragTranslateX}px) scale(1.02)`
                                 : 'scale(1)'};
-                                    box-shadow: {draggingId === event.id
-                                ? '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                                : ''};
-                                    transition: {draggingId === event.id
+                                box-shadow: {draggingId === event.id
+                                ? '0 10px 15px -3px rgba(0, 0, 0, 0.3)'
+                                : '0 1px 2px rgba(0,0,0,.2)'};
+                                transition: {draggingId === event.id
                                 ? 'none'
-                                : 'top 0.1s ease-out, background-color 0.15s ease'};
-                                    background-color: {event.color ||
+                                : 'top 0.15s ease-out, height 0.15s ease-out'};
+                                background-color: {event.color ||
                                 defaultEventColor};
-                                    border-color: {event.color ||
+                                border-radius: var(--gcal-event-radius);
+                                border-left: 4px solid {event.color ||
                                 defaultEventColor};
-                                "
+                            "
                             on:mousedown={(e) => handleMouseDown(e, event)}
                             on:click|stopPropagation
                             role="button"
                             tabindex="0"
-                            on:keydown={() => {}}
+                            on:keydown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    dispatch("eventClick", event);
+                                    e.preventDefault();
+                                }
+                            }}
                         >
-                            <div class="font-bold truncate pointer-events-none">
-                                {event.title}
-                            </div>
                             <div
-                                class="opacity-80 truncate pointer-events-none"
+                                class="h-full {isSmall
+                                    ? 'p-0.5 flex flex-row items-center gap-1'
+                                    : 'p-1.5 flex flex-col'}"
+                                style="background-color: rgba(0,0,0,0.1);"
                             >
-                                {getTimePart(event.start)} - {getTimePart(
-                                    event.end,
-                                )}
+                                <div
+                                    class="font-medium truncate pointer-events-none text-white"
+                                    style="font-size: {isSmall
+                                        ? '11px'
+                                        : '12px'}; flex-shrink: 0; max-width: {isSmall
+                                        ? '60%'
+                                        : '100%'};"
+                                >
+                                    {event.title}
+                                </div>
+                                {#if isSmall}
+                                    <div
+                                        class="truncate pointer-events-none text-white/80"
+                                        style="font-size: 10px;"
+                                    >
+                                        {getTimePart(event.start)}
+                                    </div>
+                                {:else}
+                                    <div
+                                        class="truncate pointer-events-none text-white/80"
+                                        style="font-size: 11px;"
+                                    >
+                                        {getTimePart(event.start)} – {getTimePart(
+                                            event.end,
+                                        )}
+                                    </div>
+                                {/if}
                             </div>
                         </div>
                     {/each}
-                    {#if draggingEvent && draggingId === draggingEvent.id && dayIndex === currentDayIndex && !getEventsForDay(day).some((e) => e.id === draggingEvent?.id)}
+
+                    <!-- Ghost event during drag to different day -->
+                    {#if draggingEvent && draggingId === draggingEvent.id && dayIndex === currentDayIndex && !getEventsForDay(day, eventsByDay).some((e) => e.id === draggingEvent?.id)}
+                        {@const height = getEventHeight(draggingEvent)}
+                        {@const isSmall = height <= 30}
                         <div
-                            class="absolute left-1 right-1 rounded text-primary-content p-1 hover:brightness-110 transition-colors cursor-move z-10 overflow-hidden shadow-sm text-xs border pointer-events-none"
+                            class="absolute rounded z-10 overflow-hidden text-xs pointer-events-none event-card"
                             style="
-                                    top: {currentTop}px;
-                                    height: {getEventHeight(draggingEvent)}px;
-                                    z-index: 50;
-                                    opacity: 0.9;
-                                    transform: scale(1.02);
-                                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-                                    transition: none;
-                                    background-color: {draggingEvent.color ||
+                                left: 2px;
+                                right: 2px;
+                                top: {currentTop}px;
+                                height: {height}px;
+                                z-index: 50;
+                                opacity: 0.9;
+                                transform: scale(1.02);
+                                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+                                background-color: {draggingEvent.color ||
                                 defaultEventColor};
-                                    border-color: {draggingEvent.color ||
+                                border-radius: var(--gcal-event-radius);
+                                border-left: 4px solid {draggingEvent.color ||
                                 defaultEventColor};
-                                "
+                            "
                             role="button"
                             tabindex="0"
                         >
-                            <div class="font-bold truncate pointer-events-none">
-                                {draggingEvent.title}
-                            </div>
                             <div
-                                class="opacity-80 truncate pointer-events-none"
+                                class="h-full {isSmall
+                                    ? 'p-0.5 flex flex-row items-center gap-1'
+                                    : 'p-1.5 flex flex-col'}"
+                                style="background-color: rgba(0,0,0,0.1);"
                             >
-                                {getTimePart(draggingEvent.start)} - {getTimePart(
-                                    draggingEvent.end,
-                                )}
+                                <div
+                                    class="font-medium truncate pointer-events-none text-white"
+                                    style="font-size: {isSmall
+                                        ? '11px'
+                                        : '12px'}; flex-shrink: 0; max-width: {isSmall
+                                        ? '60%'
+                                        : '100%'};"
+                                >
+                                    {draggingEvent.title}
+                                </div>
+                                {#if isSmall}
+                                    <div
+                                        class="truncate pointer-events-none text-white/80"
+                                        style="font-size: 10px;"
+                                    >
+                                        {getTimePart(draggingEvent.start)}
+                                    </div>
+                                {:else}
+                                    <div
+                                        class="truncate pointer-events-none text-white/80"
+                                        style="font-size: 11px;"
+                                    >
+                                        {getTimePart(draggingEvent.start)} – {getTimePart(
+                                            draggingEvent.end,
+                                        )}
+                                    </div>
+                                {/if}
                             </div>
                         </div>
                     {/if}
@@ -387,43 +592,62 @@
 </div>
 
 <style>
-    .custom-scrollbar::-webkit-scrollbar {
-        width: 8px;
+    /* 30-min slot hover */
+    .slot-half {
+        position: absolute;
+        cursor: pointer;
     }
-    .custom-scrollbar::-webkit-scrollbar-track {
-        background: transparent;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-        background-color: rgba(156, 163, 175, 0.3);
-        border-radius: 4px;
-    }
-
-    /* Week slide animations */
-    :global(.slide-from-right) {
-        animation: slideInRight 0.28s ease-out;
-    }
-    :global(.slide-from-left) {
-        animation: slideInLeft 0.28s ease-out;
+    .slot-hover {
+        position: absolute;
+        inset: 0;
+        background-color: var(--gcal-hover);
+        opacity: 0;
+        transition: opacity 0.1s;
+        pointer-events: none;
     }
 
-    @keyframes slideInRight {
-        from {
-            opacity: 0.6;
-            transform: translateX(40px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
+    /* Force hide scrollbar locally */
+    .no-scrollbar::-webkit-scrollbar {
+        display: none !important;
+        width: 0 !important;
+        background: transparent !important;
     }
-    @keyframes slideInLeft {
-        from {
-            opacity: 0.6;
-            transform: translateX(-40px);
-        }
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none !important;
+    }
+    .slot-half:hover .slot-hover {
+        opacity: 1;
+    }
+
+    /* Event card hover */
+    .event-card {
+        transition: filter 0.15s ease;
+    }
+    .event-card:hover {
+        filter: brightness(1.1);
+    }
+
+    /* Current time indicator */
+    .current-time-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background-color: #ea4335;
+        z-index: 60;
+        pointer-events: none;
+        display: block !important;
+    }
+    .current-time-dot {
+        position: absolute;
+        left: -6px;
+        top: -4px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: #ea4335;
+        z-index: 61;
+        display: block !important;
     }
 </style>

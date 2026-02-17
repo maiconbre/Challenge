@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddRouting(options => options.LowercaseUrls = true);
+
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -19,7 +21,7 @@ var mongoDatabaseName = builder.Configuration["MongoDB:DatabaseName"] ?? "Calend
 
 builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(mongoConnectionString));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoClient>().GetDatabase(mongoDatabaseName));
-builder.Services.AddSingleton<EventService>();
+builder.Services.AddScoped<EventService>();
 
 builder.Services.AddCors(options =>
 {
@@ -31,11 +33,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.Configure<System.Text.Json.JsonSerializerOptions>(options =>
-{
-    options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-    options.PropertyNameCaseInsensitive = true;
-});
+
 
 var app = builder.Build();
 

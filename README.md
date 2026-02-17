@@ -1,108 +1,93 @@
-# 📅 Calendar App — Teste Junior Full-Stack
+# 📅 Calendário Full-Stack — Desafio Técnico
 
-Aplicação de calendário dinâmico com visualizações semana/mês, drag-and-drop de eventos e operações CRUD em tempo real.
+Uma aplicação de calendário robusta e interativa, inspirada no Google Calendar. Desenvolvida com foco em **experiência do usuário (UX)**, **código limpo** e **performance**.
 
-## Arquitetura
+## 🚀 Funcionalidades Principais
 
-```
-Frontend (SvelteKit + TypeScript)  →  Nginx (:5174)  →  Backend (.NET 8.0)  →  MongoDB
-```
-
-| Camada | Tecnologia | Função |
-|--------|-----------|--------|
-| Frontend | SvelteKit, TailwindCSS, DaisyUI | SPA estático (adapter-static) |
-| Backend | .NET 8.0 ASP.NET Core | API REST |
-| Banco de Dados | MongoDB | Armazenamento de eventos |
-| DevOps | Docker Compose | Orquestração multi-container |
-
-## Como Executar
-
-```bash
-unzip challenge.zip
-docker compose up
-# → http://localhost:5174
-```
-
-## Funcionalidades
-
-- **Visualização Semana & Mês** — Layouts alternáveis com cabeçalhos de dias
-- **CRUD de Eventos** — Criar, visualizar, atualizar e excluir via modais
-- **Drag & Drop** — Arrastar eventos entre dias/horários na visão semanal
-- **Sidebar** — Mini calendário, notas rápidas, botão de criar
-- **Notificações Toast** — Feedback visual com códigos HTTP
-- **Layout Responsivo** — Otimizado para desktop
-
-## Estrutura do Projeto
-
-```
-Challenge/
-├── backend/                  API REST .NET 8.0
-│   ├── Controllers/          Endpoints da API
-│   ├── Models/               Modelo CalendarEvent
-│   └── Services/             Lógica CRUD + MongoDB
-│
-├── frontend/                 Aplicação SvelteKit
-│   ├── src/
-│   │   ├── routes/+page.svelte    App principal (página única)
-│   │   └── lib/
-│   │       ├── components/        WeekView, MonthView, Sidebar
-│   │       ├── utils/             dateUtils, eventUtils (funções puras)
-│   │       ├── api.ts             Cliente HTTP
-│   │       ├── stores.ts          Svelte stores (modais, toasts, data)
-│   │       └── types.ts           Interfaces TypeScript
-│   ├── tests/
-│   │   └── browser.spec.ts        12 testes Playwright
-│   └── playwright.config.ts
-│
-├── docker-compose.yml
-└── README.md
-```
-
-## Endpoints da API
-
-| Método | Endpoint | Descrição | Status |
-|--------|----------|-----------|--------|
-| GET | `/api/events` | Listar todos os eventos | 200 |
-| POST | `/api/events` | Criar evento | 201 |
-| PUT | `/api/events/{id}` | Atualizar evento | 200 |
-| DELETE | `/api/events/{id}` | Excluir evento | 204 |
-
-## Testes
-
-```bash
-cd frontend
-npx playwright test browser.spec.ts
-```
-
-**12 testes** cobrindo todas as funcionalidades:
-
-| Teste | O que valida |
-|-------|-------------|
-| Carregar página e visão semanal | Renderização, header, cabeçalhos dos dias |
-| Navegar entre semanas | Botões anterior/próximo |
-| Botão Hoje | Saltar para data atual |
-| Alternar visualização | Semana ↔ Mês |
-| Abrir modal de criação | Clique no slot → modal |
-| Criar evento | Fluxo completo: formulário → API → toast → render |
-| Modal de detalhes | Clique no evento → visão detalhada |
-| Excluir evento | Excluir → confirmar → toast |
-| Criar via sidebar | Botão do sidebar abre modal |
-| Eixo de horários | Labels de hora (08:00, 12:00) |
-| Mini calendário | Renderização do calendário na sidebar |
-| Notas rápidas | Seção de notas rápidas |
-
-Os testes usam interceptação de rotas do Playwright para simular a API, rodando independente do Docker.
-
-## Regras Atendidas
-
-- ✅ 100% TypeScript 
-- ✅ Apenas SvelteKit + TailwindCSS + DaisyUI (sem dependências extras)
-- ✅ Estrutura de pastas padrão SvelteKit
-- ✅ adapter-static para geração de site estático
-- ✅ Todo código escrito em inglês
-- ✅ `docker compose up` → app funcionando em localhost:5174
-- ✅ `npx playwright test browser.spec.ts` → 12/12 passando
+*   **Visualização Inteligente**: Alternância fluida entre visualizações de **Semana** e **Mês**.
+*   **Drag & Drop**: Arraste e solte eventos para reagendar facilmente (dentro do dia ou entre dias).
+*   **Auto-Scroll**: A visualização semanal foca automaticamente no horário atual.
+*   **Gestão Completa**: Criação, edição e exclusão de eventos com modais intuitivos.
+*   **Sidebar Interativa**: Mini-calendário para navegação rápida e filtros de categorias.
+*   **Feedback Visual**: Notificações (toasts) para todas as ações do usuário.
+*   **Responsividade**: Layout otimizado para desktop.
 
 ---
 
-Desenvolvido por **Maicon B.** — [Targetweb.tech](https://targetweb.tech)
+## 🛠 Tech Stack
+
+Projeto construído utilizando tecnologias modernas e práticas de mercado:
+
+| Camada | Tecnologia | Destaque |
+| :--- | :--- | :--- |
+| **Frontend** | **SvelteKit** | Framework full-stack de alta performance. |
+| **Estilização** | **TailwindCSS** | Design system utilitário para UI consistente. |
+| **Backend** | **.NET 8** | API REST robusta e escalável. |
+| **Banco de Dados** | **MongoDB** | Flexibilidade para dados de eventos. |
+| **Infraestrutura** | **Docker** | Orquestração de containers para ambiente dev/prod. |
+| **QA / Testes** | **Playwright** | Testes End-to-End (E2E) automatizados. |
+
+---
+
+## 📦 Como Rodar o Projeto
+
+### Opção 1: Docker (Recomendada)
+A maneira mais simples de executar a aplicação completa (Frontend + Backend + Banco).
+
+1.  **Extraia o projeto** (`unzip challenge.zip`).
+2.  **Execute via Docker Compose**:
+    ```bash
+    docker compose up --build
+    ```
+3.  **Acesse**:
+    *   **Frontend**: [http://localhost:5174](http://localhost:5174)
+    *   **Swagger API**: [http://localhost:5204/swagger](http://localhost:5204/swagger)
+
+### Opção 2: Execução Manual
+
+<details>
+<summary>Clique para ver instruções manuais</summary>
+
+#### Backend
+```bash
+cd backend
+dotnet restore
+dotnet run
+# API iniciará em http://localhost:5204
+```
+*Nota: Requer instância local do MongoDB ou ajuste na connection string.*
+
+#### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+# App iniciará em http://localhost:5174
+```
+</details>
+
+---
+
+## 🧪 Testes Automatizados
+
+O projeto conta com uma suíte de testes E2E cobrindo os fluxos críticos.
+
+```bash
+cd frontend
+
+# Instalar navegadores do Playwright (apenas primeira vez)
+npx playwright install
+
+# Rodar todos os testes
+npx playwright test
+
+# Rodar com navegador aberto (visual)
+npx playwright test --headed
+```
+
+**Cobertura:**
+✅ Renderização de Views | ✅ CRUD de Eventos | ✅ Drag & Drop | ✅ Navegação Temporal
+
+---
+
+Desenvolvido por **Maicon B.**

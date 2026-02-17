@@ -20,24 +20,42 @@
     }>();
 
     let days: CalendarDay[] = [];
-    const defaultEventColor = "#3b82f6";
+    const defaultEventColor = "#8ab4f8";
 
     $: days = buildCalendarMonth(currentDate);
     $: selectedDate = $selectedDateStore;
 
+    let eventsByDay: Record<string, CalendarEvent[]> = {};
+
+    $: {
+        eventsByDay = {};
+        events.forEach((e) => {
+            const dateStr = getDatePart(e.start);
+            if (!eventsByDay[dateStr]) eventsByDay[dateStr] = [];
+            eventsByDay[dateStr].push(e);
+        });
+    }
+
     function getEventsForDay(dateStr: string): CalendarEvent[] {
-        return events.filter((e) => getDatePart(e.start) === dateStr);
+        return eventsByDay[dateStr] || [];
     }
 </script>
 
 <div
-    class="flex flex-col h-full bg-base-100 border border-base-200 rounded-lg overflow-hidden"
+    class="flex flex-col h-full overflow-hidden"
+    style="background-color: var(--gcal-bg); border: 1px solid var(--gcal-border); border-radius: 8px;"
 >
     <!-- Header Weekdays -->
-    <div class="grid grid-cols-7 border-b border-base-200 bg-base-200/50">
+    <div
+        class="grid grid-cols-7"
+        style="border-bottom: 1px solid var(--gcal-border);"
+    >
         {#each WEEKDAYS as day}
-            <div class="py-2 text-center text-sm font-semibold opacity-70">
-                {day}
+            <div
+                class="py-2.5 text-center text-[11px] font-medium tracking-wider"
+                style="color: var(--gcal-text-muted);"
+            >
+                {day.toUpperCase()}
             </div>
         {/each}
     </div>
@@ -45,22 +63,20 @@
     <!-- Calendar Grid -->
     <div class="flex-1 grid grid-cols-7 grid-rows-6">
         {#each days as { day, dateStr, isCurrentMonth, isToday } (dateStr)}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <div
-                class="border-b border-r border-base-200 min-h-[100px] p-1 relative transition-colors hover:bg-base-200/30 group
-                {!isCurrentMonth ? 'bg-base-200/10 text-base-content/30' : ''}
-                {isToday ? 'bg-primary/5' : ''}
-                {selectedDate === dateStr
-                    ? 'ring-2 ring-primary ring-inset'
-                    : ''}"
+            <button
+                class="gcal-month-cell min-h-[100px] p-1.5 relative group text-left w-full align-top"
+                class:is-other-month={!isCurrentMonth}
+                class:is-selected={selectedDate === dateStr}
                 on:click={() => dispatch("dayClick", dateStr)}
+                type="button"
             >
                 <!-- Date Number -->
-                <div class="flex justify-between items-start mb-1">
+                <div class="flex justify-start items-start mb-1">
                     <span
-                        class="text-sm font-medium w-7 h-7 flex items-center justify-center rounded-full
-                        {isToday ? 'bg-primary text-primary-content' : ''}"
+                        class="gcal-date-bubble text-xs font-medium"
+                        class:is-today={isToday}
+                        class:gcal-text-color={isCurrentMonth && !isToday}
+                        class:gcal-text-muted-color={!isCurrentMonth}
                     >
                         {day}
                     </span>
@@ -68,35 +84,39 @@
 
                 <!-- Events List -->
                 <div
-                    class="flex flex-col gap-1 overflow-hidden max-h-[calc(100%-2rem)]"
+                    class="flex flex-col gap-0.5 overflow-hidden max-h-[calc(100%-2rem)]"
                 >
-                    {#each getEventsForDay(dateStr).slice(0, 4) as event}
-                        <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <div
-                            class="text-xs truncate px-1.5 py-0.5 rounded cursor-pointer text-primary-content font-medium border-l-2"
+                    {#each getEventsForDay(dateStr).slice(0, 3) as event}
+                        <button
+                            class="gcal-text-color text-[11px] truncate px-1.5 py-0.5 rounded cursor-pointer font-medium transition-opacity hover:opacity-90 w-full text-left block mb-0.5 border-0"
                             style="
                                 background-color: {event.color ||
                                 defaultEventColor}33;
-                                border-left-color: {event.color ||
+                                border-left: 3px solid {event.color ||
                                 defaultEventColor};
                             "
                             on:click|stopPropagation={() =>
                                 dispatch("eventClick", event)}
                             title="{event.title} ({getTimePart(event.start)})"
+                            type="button"
                         >
-                            {getTimePart(event.start)}
+                            <span
+                                class="gcal-text-secondary-color"
+                                style="margin-right: 2px;"
+                                >{getTimePart(event.start)}</span
+                            >
                             {event.title}
-                        </div>
+                        </button>
                     {/each}
-                    {#if getEventsForDay(dateStr).length > 4}
+                    {#if getEventsForDay(dateStr).length > 3}
                         <div
-                            class="text-xs text-center text-base-content/50 font-medium hover:text-primary cursor-pointer"
+                            class="gcal-more-link text-[10px] text-center font-medium cursor-pointer px-1 py-0.5 rounded"
                         >
-                            + {getEventsForDay(dateStr).length - 4} more
+                            + {getEventsForDay(dateStr).length - 3} more
                         </div>
                     {/if}
                 </div>
-            </div>
+            </button>
         {/each}
     </div>
 </div>
