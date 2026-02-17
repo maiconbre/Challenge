@@ -29,6 +29,12 @@ public class EventsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(CalendarEvent newEvent)
     {
+        if (string.IsNullOrWhiteSpace(newEvent.Title))
+            return BadRequest(new { message = "Title is required." });
+
+        if (newEvent.Start >= newEvent.End)
+            return BadRequest(new { message = "Start date must be before End date." });
+
         await _eventService.CreateAsync(newEvent);
         return CreatedAtAction(nameof(GetById), new { id = newEvent.Id }, newEvent);
     }
@@ -44,5 +50,11 @@ public class EventsController : ControllerBase
     public async Task<IActionResult> Delete(string id)
     {
         return await _eventService.DeleteAsync(id) ? NoContent() : NotFound();
+    }
+
+    [HttpDelete("series/{groupId}")]
+    public async Task<IActionResult> DeleteSeries(string groupId)
+    {
+        return await _eventService.DeleteSeriesAsync(groupId) ? NoContent() : NotFound();
     }
 }

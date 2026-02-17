@@ -3,16 +3,16 @@
         openCreateModal,
         selectedDateStore,
         setSelectedDate,
+        myCalendarsStore,
+        otherCalendarsStore,
+        toggleMyCalendar,
+        toggleOtherCalendar,
+        myCalendarsOpenStore,
+        otherCalendarsOpenStore,
     } from "$lib/stores";
-    import { formatDateISO } from "$lib/utils/dateUtils";
-
-    const quickNotes = [
-        { label: "Meeting", icon: "💼" },
-        { label: "Birthday", icon: "🎂" },
-        { label: "Reminder", icon: "⏰" },
-        { label: "Daily", icon: "📅" },
-        { label: "Event", icon: "🎉" },
-    ];
+    import Icon from "./Icon.svelte";
+    import { formatDateISO, buildCalendarMonth } from "$lib/utils/dateUtils";
+    import { slide } from "svelte/transition";
 
     // Mini Calendar Logic
     let currentDate = new Date();
@@ -24,61 +24,12 @@
         year: "numeric",
     });
 
-    $: days = getDaysInMonth(year, month);
-
-    function getDaysInMonth(year: number, month: number) {
-        const date = new Date(year, month, 1);
-        const days = [];
-        const firstDay = new Date(year, month, 1).getDay();
-        const prevMonthLastDate = new Date(year, month, 0).getDate();
-
-        // Prev month days
-        for (let i = firstDay - 1; i >= 0; i--) {
-            const d = new Date(year, month - 1, prevMonthLastDate - i);
-            days.push({
-                day: prevMonthLastDate - i,
-                date: d,
-                dateStr: formatDateISO(d),
-                current: false,
-                prev: true,
-            });
-        }
-
-        // Current month days
-        while (date.getMonth() === month) {
-            days.push({
-                day: date.getDate(),
-                date: new Date(date),
-                dateStr: formatDateISO(date),
-                current: true,
-                today: isToday(date),
-            });
-            date.setDate(date.getDate() + 1);
-        }
-
-        // Next month days (fill up to 42 for 6 rows)
-        const remaining = 42 - days.length;
-        for (let i = 1; i <= remaining; i++) {
-            const d = new Date(year, month + 1, i);
-            days.push({
-                day: i,
-                date: d,
-                dateStr: formatDateISO(d),
-                current: false,
-                next: true,
-            });
-        }
-        return days;
-    }
-
-    function isToday(date: Date) {
-        const today = new Date();
-        return (
-            date.getDate() === today.getDate() &&
-            date.getMonth() === today.getMonth() &&
-            date.getFullYear() === today.getFullYear()
-        );
-    }
+    $: days = buildCalendarMonth(currentDate).map((d) => ({
+        day: d.day,
+        dateStr: d.dateStr,
+        current: d.isCurrentMonth,
+        today: d.isToday,
+    }));
 
     function prevMonth() {
         currentDate = new Date(year, month - 1, 1);
@@ -95,97 +46,71 @@
         openCreateModal("", "");
     }
 
-    function handleQuickNote(label: string) {
-        openCreateModal(label, "");
+    function handleToggleMyCalendars() {
+        myCalendarsOpenStore.update((v) => !v);
+    }
+
+    function handleToggleOtherCalendars() {
+        otherCalendarsOpenStore.update((v) => !v);
     }
 </script>
 
 <aside
-    class="w-64 flex-shrink-0 flex flex-col bg-base-100 border-r border-base-200 h-full p-4 gap-6"
+    class="flex flex-col h-full overflow-hidden gcal-bg-color gcal-border-subtle-right"
 >
-    <!-- Create Button -->
-    <button
-        class="btn btn-primary btn-lg rounded-full shadow-md gap-3 w-full justify-start normal-case pl-6"
-        on:click={handleCreate}
-    >
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            class="w-8 h-8"
-        >
-            <path
-                d="M12 4V20M20 12H4"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            />
-        </svg>
-        <span class="text-lg">Create</span>
-    </button>
+    <!-- Create Button - Google Style -->
+    <div class="px-3 pt-4 pb-2">
+        <button class="gcal-create-btn" on:click={handleCreate}>
+            <Icon name="plus" size={36} className="text-[#8ab4f8]" />
+            <span>Create</span>
+        </button>
+    </div>
 
     <!-- Mini Calendar -->
-    <div class="px-2">
-        <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-semibold ml-2">{monthLabel}</span>
-            <div class="flex">
+    <div class="px-4 pb-2 pt-2">
+        <div class="flex items-center justify-between mb-3">
+            <span class="text-sm font-medium gcal-text-color">{monthLabel}</span
+            >
+            <div class="flex gap-0">
                 <button
-                    class="btn btn-xs btn-ghost btn-circle"
+                    class="gcal-btn-icon"
+                    style="width: 28px; height: 28px;"
                     on:click={prevMonth}
+                    aria-label="Previous month"
                 >
-                    <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M15 19l-7-7 7-7"
-                        ></path></svg
-                    >
+                    <Icon name="chevron-left" size={16} />
                 </button>
                 <button
-                    class="btn btn-xs btn-ghost btn-circle"
+                    class="gcal-btn-icon"
+                    style="width: 28px; height: 28px;"
                     on:click={nextMonth}
+                    aria-label="Next month"
                 >
-                    <svg
-                        class="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M9 5l7 7-7 7"
-                        ></path></svg
-                    >
+                    <Icon name="chevron-right" size={16} />
                 </button>
             </div>
         </div>
-        <div
-            class="grid grid-cols-7 text-center text-[10px] text-base-content/60 mb-1"
-        >
-            <span>S</span><span>M</span><span>T</span><span>W</span><span
-                >T</span
-            ><span>F</span><span>S</span>
+
+        <!-- Weekday headers -->
+        <div class="grid grid-cols-7 text-center mb-1">
+            {#each ["S", "M", "T", "W", "T", "F", "S"] as dayLabel}
+                <span
+                    class="text-[10px] font-medium leading-8 gcal-text-muted-color"
+                >
+                    {dayLabel}
+                </span>
+            {/each}
         </div>
-        <div class="grid grid-cols-7 gap-y-1 text-center text-xs">
+
+        <!-- Days grid -->
+        <div class="grid grid-cols-7 text-center text-xs">
             {#each days as { day, dateStr, current, today }}
                 <button
-                    class="w-6 h-6 flex items-center justify-center rounded-full mx-auto transition-colors
-                    {current ? 'text-base-content' : 'text-base-content/30'}
-                    {today
-                        ? 'bg-primary text-primary-content'
-                        : 'hover:bg-primary/20 cursor-pointer'}
-                    {$selectedDateStore === dateStr
-                        ? 'ring-2 ring-primary ring-offset-1'
-                        : ''}"
+                    class="mini-cal-day"
+                    class:is-current={current}
+                    class:is-other={!current}
+                    class:is-today={today}
+                    class:is-selected={$selectedDateStore === dateStr && !today}
                     on:click={() => handleDateClick(dateStr)}
                 >
                     {day}
@@ -194,25 +119,215 @@
         </div>
     </div>
 
-    <!-- Quick Notes -->
-    <div class="flex-1 overflow-y-auto">
-        <h3
-            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3 px-2"
-        >
-            Quick Notes
-        </h3>
-        <ul class="menu bg-base-100 w-full p-0 gap-1">
-            {#each quickNotes as note}
-                <li>
-                    <button
-                        class="flex gap-3 active:bg-primary active:text-primary-content"
-                        on:click={() => handleQuickNote(note.label)}
-                    >
-                        <span class="text-xl">{note.icon}</span>
-                        <span class="font-medium">{note.label}</span>
-                    </button>
-                </li>
-            {/each}
-        </ul>
+    <!-- Divider -->
+    <div class="mx-4 gcal-border-subtle-bottom"></div>
+
+    <!-- My Calendars (Collapsible) -->
+    <div class="flex-1 overflow-y-auto px-4 pt-4 no-scrollbar">
+        <div class="flex items-center justify-between mb-2">
+            <h3
+                class="text-xs font-medium tracking-wide gcal-text-secondary-color"
+            >
+                My calendars
+            </h3>
+            <button
+                class="gcal-btn-icon section-toggle"
+                style="width: 24px; height: 24px;"
+                on:click={handleToggleMyCalendars}
+                aria-label="Toggle My calendars"
+                aria-expanded={$myCalendarsOpenStore}
+            >
+                <Icon
+                    name="chevron-down"
+                    size={12}
+                    className="transition-transform duration-200 {!$myCalendarsOpenStore
+                        ? 'rotate-180'
+                        : ''}"
+                />
+            </button>
+        </div>
+
+        {#if $myCalendarsOpenStore}
+            <ul class="space-y-0.5 calendar-section" transition:slide>
+                {#each $myCalendarsStore as cal, i}
+                    <li>
+                        <button
+                            class="gcal-sidebar-item"
+                            on:click={() => toggleMyCalendar(i)}
+                        >
+                            <span class="gcal-checkbox-wrapper">
+                                <span
+                                    class="gcal-checkbox"
+                                    class:checked={cal.checked}
+                                    style="--cb-color: {cal.color};"
+                                >
+                                    {#if cal.checked}
+                                        <Icon name="check-circle" size={12} />
+                                    {/if}
+                                </span>
+                            </span>
+                            <span
+                                class="truncate"
+                                class:gcal-text-color={cal.checked}
+                                class:gcal-text-muted-color={!cal.checked}
+                            >
+                                {cal.label}
+                            </span>
+                        </button>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
+
+        <!-- Divider -->
+        <div class="my-3 gcal-border-subtle-bottom"></div>
+
+        <!-- Other Calendars (Collapsible) -->
+        <div class="flex items-center justify-between mb-2">
+            <h3
+                class="text-xs font-medium tracking-wide gcal-text-secondary-color"
+            >
+                Other calendars
+            </h3>
+            <div class="flex gap-0">
+                <button
+                    class="gcal-btn-icon"
+                    style="width: 24px; height: 24px;"
+                    aria-label="Add calendar"
+                >
+                    <Icon name="plus-sm" size={12} />
+                </button>
+                <button
+                    class="gcal-btn-icon section-toggle"
+                    style="width: 24px; height: 24px;"
+                    on:click={handleToggleOtherCalendars}
+                    aria-label="Toggle Other calendars"
+                    aria-expanded={$otherCalendarsOpenStore}
+                >
+                    <Icon
+                        name="chevron-down"
+                        size={12}
+                        className="transition-transform duration-200 {!$otherCalendarsOpenStore
+                            ? 'rotate-180'
+                            : ''}"
+                    />
+                </button>
+            </div>
+        </div>
+
+        {#if $otherCalendarsOpenStore}
+            <ul class="space-y-0.5 calendar-section" transition:slide>
+                {#each $otherCalendarsStore as cal, i}
+                    <li>
+                        <button
+                            class="gcal-sidebar-item"
+                            on:click={() => toggleOtherCalendar(i)}
+                        >
+                            <span class="gcal-checkbox-wrapper">
+                                <span
+                                    class="gcal-checkbox"
+                                    class:checked={cal.checked}
+                                    style="--cb-color: {cal.color};"
+                                >
+                                    {#if cal.checked}
+                                        <Icon name="check-circle" size={12} />
+                                    {/if}
+                                </span>
+                            </span>
+                            <span
+                                class="truncate"
+                                class:gcal-text-color={cal.checked}
+                                class:gcal-text-muted-color={!cal.checked}
+                            >
+                                {cal.label}
+                            </span>
+                        </button>
+                    </li>
+                {/each}
+            </ul>
+        {/if}
     </div>
 </aside>
+
+<style>
+    .mini-cal-day {
+        width: 26px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        margin: 0 auto;
+        cursor: pointer;
+        transition: background-color 0.1s;
+        border: none;
+        background: transparent;
+        font-size: 11px;
+    }
+    .mini-cal-day.is-current {
+        color: var(--gcal-text);
+    }
+    .mini-cal-day.is-other {
+        color: var(--gcal-text-muted);
+    }
+    .mini-cal-day.is-today {
+        background-color: var(--gcal-today-bg) !important;
+        color: white !important;
+        font-weight: 700;
+    }
+    .mini-cal-day.is-selected {
+        background-color: var(--gcal-blue-surface) !important;
+        color: var(--gcal-blue) !important;
+    }
+    .mini-cal-day:hover:not(.is-today):not(.is-selected) {
+        background-color: var(--gcal-hover);
+    }
+
+    /* Sidebar item */
+    .gcal-sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 4px;
+        text-align: left;
+        font-size: 13px;
+        transition: background-color 0.1s;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+    }
+    .gcal-sidebar-item:hover {
+        background-color: var(--gcal-hover);
+    }
+
+    /* Checkbox */
+    .gcal-checkbox-wrapper {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .gcal-checkbox {
+        width: 18px;
+        height: 18px;
+        border-radius: 3px;
+        border: 2px solid var(--cb-color, #8ab4f8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        background: transparent;
+        color: white;
+    }
+    .gcal-checkbox.checked {
+        background-color: var(--cb-color, #8ab4f8);
+        border-color: var(--cb-color, #8ab4f8);
+    }
+
+    /* Section animation */
+    .calendar-section {
+        overflow: hidden;
+    }
+</style>
