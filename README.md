@@ -89,4 +89,4 @@ npx playwright test --headed
 
 ---
 
-Desenvolvido por **Maicon B.**
+Desenvolvido por **Maicon Brendon** — [TargetWeb](https://www.targetweb.tech)
