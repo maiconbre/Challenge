@@ -41,7 +41,6 @@ A maneira mais simples de executar a aplicação completa (Frontend + Backend + 
     ```
 3.  **Acesse**:
     *   **Frontend**: [http://localhost:5174](http://localhost:5174)
-    *   **Swagger API**: [http://localhost:5204/swagger](http://localhost:5204/swagger)
 
 ### Opção 2: Execução Manual
 
