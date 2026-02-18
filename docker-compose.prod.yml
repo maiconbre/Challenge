@@ -1,0 +1,39 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: calendar-mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    container_name: calendar-backend
+    restart: always
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    command: dotnet run --project /app/Challenge.csproj --urls=http://+:8080
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - MongoDB__ConnectionString=mongodb://mongo:27017
+      - MongoDB__DatabaseName=CalendarDb
+    depends_on:
+      - mongo
+    # Coolify detectará a porta 8080 exposta pela env var ou Dockerfile
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: calendar-frontend
+    restart: always
+    environment:
+      - VITE_API_TARGET=http://backend:8080
+    depends_on:
+      - backend
+    # Porta 80 é exposta no Dockerfile do frontend
+
+volumes:
+  mongo_data:
