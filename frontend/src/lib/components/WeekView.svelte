@@ -156,6 +156,11 @@
     let hasSwitchedWeek = false;
     const edgeThreshold = 32;
 
+    // Edge switching state
+    let lastSwitchTime = 0;
+    let edgeCheckInterval: ReturnType<typeof setInterval> | null = null;
+    let lastClientX = 0;
+
     function getDayWidth(): number {
         if (!gridEl || !timeAxisEl || weekDays.length === 0) return 0;
         const rect = gridEl.getBoundingClientRect();
@@ -189,6 +194,30 @@
         return 0;
     }
 
+    function checkEdgeSwitch() {
+        const direction = getEdgeDirection(lastClientX);
+        if (direction === 0) {
+            if (edgeCheckInterval) {
+                clearInterval(edgeCheckInterval);
+                edgeCheckInterval = null;
+            }
+            return;
+        }
+
+        const now = Date.now();
+        if (now - lastSwitchTime > 1000) {
+            performSwitch(direction);
+        }
+    }
+
+    function performSwitch(direction: -1 | 1) {
+        lastSwitchTime = Date.now();
+        hasSwitchedWeek = true;
+        initialDayIndex = currentDayIndex;
+        dragTranslateX = 0;
+        dispatch("weekEdge", { direction });
+    }
+
     function handleMouseDown(e: MouseEvent, event: CalendarEvent) {
         e.preventDefault();
         e.stopPropagation();
@@ -206,12 +235,19 @@
         dragTranslateX = 0;
         hasSwitchedWeek = false;
 
+        // Reset edge switching state
+        lastSwitchTime = 0;
+        if (edgeCheckInterval) clearInterval(edgeCheckInterval);
+        edgeCheckInterval = null;
+
         window.addEventListener("mousemove", handleWindowMouseMove);
         window.addEventListener("mouseup", handleWindowMouseUp);
     }
 
     function handleWindowMouseMove(e: MouseEvent) {
         if (!draggingId) return;
+
+        lastClientX = e.clientX;
 
         const deltaY = e.clientY - initialY;
         const rawTop = initialTop + deltaY;
@@ -230,11 +266,18 @@
 
         const direction = getEdgeDirection(e.clientX);
 
-        if (direction !== 0 && !hasSwitchedWeek) {
-            hasSwitchedWeek = true;
-            initialDayIndex = currentDayIndex;
-            dragTranslateX = 0;
-            dispatch("weekEdge", { direction });
+        if (direction !== 0) {
+            if (!edgeCheckInterval) {
+                // Try to switch immediately if cooldown allows
+                checkEdgeSwitch();
+                // Then start interval for continuous switching
+                edgeCheckInterval = setInterval(checkEdgeSwitch, 100);
+            }
+        } else {
+            if (edgeCheckInterval) {
+                clearInterval(edgeCheckInterval);
+                edgeCheckInterval = null;
+            }
         }
     }
 
@@ -243,6 +286,11 @@
 
         const event =
             draggingEvent || events.find((ev) => ev.id === draggingId);
+
+        if (edgeCheckInterval) {
+            clearInterval(edgeCheckInterval);
+            edgeCheckInterval = null;
+        }
 
         window.removeEventListener("mousemove", handleWindowMouseMove);
         window.removeEventListener("mouseup", handleWindowMouseUp);
@@ -289,6 +337,7 @@
             window.removeEventListener("mousemove", handleWindowMouseMove);
             window.removeEventListener("mouseup", handleWindowMouseUp);
         }
+        if (edgeCheckInterval) clearInterval(edgeCheckInterval);
     });
 
     // 30-minute slot click handler
